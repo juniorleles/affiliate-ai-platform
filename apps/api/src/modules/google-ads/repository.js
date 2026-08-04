@@ -58,7 +58,7 @@ async function listCampaignsWithMetrics() {
 
 async function getAffiliateStatsByCampaignName() {
   const { rows } = await pool.query(`
-    SELECT cl.utm_campaign AS campaign_name,
+    SELECT LOWER(cl.utm_campaign) AS campaign_name,
       COUNT(DISTINCT cv.id) AS conversions,
       COALESCE(SUM(cv.value), 0) AS revenue
     FROM clicks cl
