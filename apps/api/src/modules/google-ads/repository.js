@@ -120,6 +120,37 @@ async function listAllCampaigns() {
   return rows;
 }
 
+async function insertKeywordMetrics(productId, ideas) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const idea of ideas) {
+      await client.query(
+        `INSERT INTO keyword_metrics
+           (product_id, keyword_text, avg_monthly_searches, competition_level,
+            competition_index, top_of_page_bid_low, top_of_page_bid_high)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [productId, idea.keywordText, idea.avgMonthlySearches, idea.competitionLevel,
+          idea.competitionIndex, idea.topOfPageBidLow, idea.topOfPageBidHigh]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function getLatestKeywordMetrics(productId) {
+  const { rows } = await pool.query(
+    'SELECT * FROM keyword_metrics WHERE product_id = $1 ORDER BY captured_at DESC LIMIT 20',
+    [productId]
+  );
+  return rows;
+}
+
 module.exports = {
   upsertCampaignsAndMetrics,
   listCampaignsWithMetrics,
@@ -130,4 +161,6 @@ module.exports = {
   updateCampaignTargets,
   getDailyMetrics,
   listAllCampaigns,
+  insertKeywordMetrics,
+  getLatestKeywordMetrics,
 };

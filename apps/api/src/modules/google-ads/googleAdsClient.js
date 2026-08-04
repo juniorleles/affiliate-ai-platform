@@ -51,4 +51,16 @@ async function fetchCampaignMetrics() {
   }));
 }
 
-module.exports = { fetchCampaignMetrics };
+/**
+ * Retorna o código de moeda da conta (ex: 'BRL', 'USD', 'EUR') — necessário
+ * pra comparar CPC de leilão com valores de comissão em outra moeda sem
+ * comparar maçã com laranja (bug real encontrado em 2026-08-04, ver
+ * docs/ARQUITETURA.md).
+ */
+async function fetchAccountCurrency() {
+  const customer = getCustomer();
+  const rows = await customer.query('SELECT customer.currency_code FROM customer LIMIT 1');
+  return rows?.[0]?.customer?.currency_code ?? null;
+}
+
+module.exports = { fetchCampaignMetrics, fetchAccountCurrency };

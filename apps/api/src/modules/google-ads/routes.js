@@ -45,4 +45,27 @@ router.get('/:id/history', requireAdmin, async (req, res) => {
   } catch (err) { handleServiceError(res, err); }
 });
 
+// Fase 2b — pesquisa palavra-chave/leilão pra um produto (não uma campanha).
+// Body: { seedKeyword?, minCommission? } — sem seedKeyword, usa o nome do produto.
+router.post('/keyword-research/:productId', requireAdmin, async (req, res) => {
+  try {
+    const { seedKeyword, minCommission } = req.body || {};
+    const result = await service.researchKeywordsForProduct(req.params.productId, { seedKeyword, minCommission });
+    res.json(result);
+  } catch (err) { handleServiceError(res, err); }
+});
+
+router.get('/keyword-research/:productId', requireAdmin, async (req, res) => {
+  const metrics = await service.getKeywordMetrics(req.params.productId);
+  res.json({ metrics });
+});
+
+// Utilitário: qual moeda a conta do Google Ads usa de verdade (não assumir).
+router.get('/account-currency', requireAdmin, async (req, res) => {
+  try {
+    const currency = await service.getAccountCurrency();
+    res.json({ currency });
+  } catch (err) { handleServiceError(res, err); }
+});
+
 module.exports = router;

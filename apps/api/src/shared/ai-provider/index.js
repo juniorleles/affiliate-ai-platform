@@ -31,8 +31,13 @@ function cleanJsonText(text) {
  * @param {object} params.context - dados da análise (será serializado como JSON no prompt)
  * @param {'claude'|'openai'} [params.provider] - default: process.env.DEFAULT_AI_PROVIDER
  * @param {string} [params.model] - override do modelo padrão do provider
+ * @param {number} [params.maxTokens] - override do limite de tokens de saída. Schemas
+ *   maiores (ex: productOpportunity, com 2 arrays + reasoning longo) precisam de mais
+ *   espaço que um veredito simples — passar explícito por chamada evita pagar o custo
+ *   de um limite alto em toda chamada só porque uma precisa (ver docs/ARQUITETURA.md,
+ *   incidente de truncamento de 2026-08-04).
  */
-async function analyze({ schema, systemPrompt, context, provider, model }) {
+async function analyze({ schema, systemPrompt, context, provider, model, maxTokens }) {
   const schemaDef = loadSchema(schema);
   const validate = ajv.compile(schemaDef);
 
@@ -48,6 +53,7 @@ async function analyze({ schema, systemPrompt, context, provider, model }) {
       systemPrompt: finalSystemPrompt,
       userPrompt,
       model,
+      maxTokens,
     });
 
     let parsed;

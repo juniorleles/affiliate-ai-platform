@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "complianceClassification",
+  "type": "object",
+  "required": ["niche_sensitivity", "requires_presell_recommendation", "confidence", "risk_flags", "reasoning"],
+  "additionalProperties": false,
+  "properties": {
+    "niche_sensitivity": {
+      "type": "string",
+      "enum": ["normal", "sensitive", "black"]
+    },
+    "requires_presell_recommendation": { "type": "boolean" },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "risk_flags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 6
+    },
+    "reasoning": { "type": "string", "maxLength": 800 }
+  }
+}

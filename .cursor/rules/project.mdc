@@ -22,6 +22,13 @@ valida entrada e delega ao service).
   diretas via `pg` (`pool.query(...)`).
 - Nunca chamar `pg` fora de um `repository.js`. Nunca chamar a API do Google Ads, Claude
   ou OpenAI fora de `shared/ai-provider` e `modules/google-ads/googleAdsClient.js`.
+- **Nenhum módulo chama `shared/ai-provider.analyze()` diretamente, exceto `ai-advisor`.**
+  Qualquer módulo que precise de uma opinião de IA chama uma função de
+  `modules/ai-advisor/service.js` (ex: `classifyProductCompliance`,
+  `analyzeCampaignBudget`) — é o `ai-advisor` quem grava em `ai_analyses` e mantém o
+  loop de aprendizado funcionando. (Isso já foi corrigido uma vez, em 2026-08-04: o
+  módulo `discovery/compliance.js` chamava `ai-provider` direto e as classificações
+  de compliance não apareciam no loop de aprendizado — não repetir esse erro.)
 - Toda resposta de IA que vira decisão de negócio passa por `shared/ai-provider` (valida
   contra JSON Schema em `shared/ai-provider/schemas/`). Nunca interpretar texto livre de
   IA diretamente em um module — se precisar de um novo tipo de análise, criar um novo
@@ -37,6 +44,29 @@ valida entrada e delega ao service).
   esses módulos silenciosamente sem antes checar `docs/ARQUITETURA.md` seção 8 e 9.
 - Todo texto de interface e commit em português (pt-BR).
 
+## Reorientação estratégica (2026-08-04) — leia antes de priorizar qualquer feature
+
+Descoberta automática de produtos (scraping/API de marketplace de rede de afiliados)
+**não é mais o foco central**. Confirmamos que a maioria das redes fecha isso via
+aprovação manual (CJ, Impact, Awin) ou proíbe explicitamente em contrato (ClickBank —
+"You agree not to... scraping" nos Termos de Uso). Não implementar nenhum scraper de
+marketplace de rede de afiliados, mesmo via serviço terceiro, sem confirmar antes que
+ele usa API oficial sancionada (BYOC) — nunca automação de navegador driblando anti-bot.
+
+O diferencial real da plataforma, a partir de agora, é:
+1. **Economics (5.1)** — trava de comissão mínima + CPC máximo calculado antes de gastar.
+2. **Compliance + Auditoria de LP (5.3, 5.4)** — subiu de prioridade no roadmap (agora é
+   "Fase 3", antes de Market Intelligence) porque evitar prejuízo não financeiro (conta
+   banida, comissão perdida por parâmetro quebrado) é tão importante quanto achar produto bom.
+3. **Loop de aprendizado** — toda linha de `ai_analyses` tem `outcome_status`
+   (`pending`|`confirmed_good`|`confirmed_bad`|`ignored`). Nunca remover isso nem tratar
+   como campo decorativo — é o que transforma análise solta em histórico calibrável.
+   Ver `ai-advisor/repository.js#recordOutcome` e `#getAccuracyStats`.
+
+Cadastro de produto continua sendo `POST /api/products/manual` / `/manual/bulk`
+(trabalho humano deliberado, não automação) até que uma fonte de API oficial legítima
+apareça pra alguma rede específica.
+
 ## O que evitar
 
 - Não implementar Módulo 3 (competitive-intel) de verdade sem a decisão de fonte de dado
@@ -48,3 +78,9 @@ valida entrada e delega ao service).
 - Não trocar Postgres por outro banco, nem tirar a fila (BullMQ/Redis) do meio do fluxo de
   IA/sync, sem que seja pedido explicitamente — isso é decisão de arquitetura, não detalhe
   de implementação.
+- Não comparar valores monetários de fontes diferentes sem checar moeda explicitamente.
+  (Bug real em 2026-08-04: `commissionValue` em EUR foi comparado direto com `cpcLeilao`
+  em BRL, invalidando resultados de Economics. Corrigido com `products.currency` +
+  `shared/fx.js`. Qualquer módulo novo que lide com dinheiro de fonte externa segue esse
+  padrão: registra a moeda de origem, converte explicitamente antes de comparar — nunca
+  assume que bate.)
