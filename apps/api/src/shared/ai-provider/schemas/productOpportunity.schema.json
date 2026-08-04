@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "productOpportunity",
+  "type": "object",
+  "required": [
+    "worth_advertising",
+    "market_saturation",
+    "max_recommended_cpa",
+    "max_recommended_cpc",
+    "suggested_initial_budget",
+    "estimated_profit_chance",
+    "confidence",
+    "main_risks",
+    "roi_improvement_suggestions",
+    "reasoning"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "worth_advertising": { "type": "boolean" },
+    "market_saturation": { "type": "string", "enum": ["low", "medium", "high"] },
+    "max_recommended_cpa": { "type": ["number", "null"] },
+    "max_recommended_cpc": { "type": ["number", "null"] },
+    "suggested_initial_budget": { "type": ["number", "null"] },
+    "estimated_profit_chance": { "type": "string", "enum": ["low", "medium", "high"] },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "main_risks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 6
+    },
+    "roi_improvement_suggestions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 6
+    },
+    "reasoning": { "type": "string", "maxLength": 1500 }
+  }
+}

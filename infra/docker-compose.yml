@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-affiliate_platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-affiliate_platform}
+      POSTGRES_DB: ${POSTGRES_DB:-affiliate_platform}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-affiliate_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ../workflows:/home/node/workflows
+    depends_on:
+      - postgres
+
+  # api e web ficam de fora do compose por padrão em dev (roda com `npm run dev:api` /
+  # `npm run dev:web` local, mais rápido pra hot-reload). Descomente pra rodar tudo em container.
+  #
+  # api:
+  #   build: ../apps/api
+  #   env_file: ../.env
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #
+  # web:
+  #   build: ../apps/web
+  #   ports:
+  #     - "5173:5173"
+  #   depends_on:
+  #     - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  n8n_data:

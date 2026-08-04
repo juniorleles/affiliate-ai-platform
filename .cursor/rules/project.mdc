@@ -1,0 +1,50 @@
+---
+description: Contexto e convenções da plataforma de afiliados + IA (monorepo)
+alwaysApply: true
+---
+
+# Contexto do projeto
+
+Plataforma privada (não comercializada) de IA para marketing de afiliados com Google Ads.
+Arquitetura completa em `docs/ARQUITETURA.md` — leia esse arquivo antes de propor qualquer
+mudança estrutural. Ele é a fonte de verdade sobre módulos, fases e decisões em aberto.
+
+## Estrutura
+
+Monorepo com npm workspaces: `apps/api` (Node.js/Express) e `apps/web` (React/Vite).
+Cada módulo do backend segue sempre: `service.js` (regra de negócio, sem SQL nem HTTP),
+`repository.js` (única camada que fala SQL — usa `pg`, sem ORM), `routes.js` (fino, só
+valida entrada e delega ao service).
+
+## Convenções
+
+- Backend: CommonJS (`require`/`module.exports`), sem TypeScript, sem ORM. Queries SQL
+  diretas via `pg` (`pool.query(...)`).
+- Nunca chamar `pg` fora de um `repository.js`. Nunca chamar a API do Google Ads, Claude
+  ou OpenAI fora de `shared/ai-provider` e `modules/google-ads/googleAdsClient.js`.
+- Toda resposta de IA que vira decisão de negócio passa por `shared/ai-provider` (valida
+  contra JSON Schema em `shared/ai-provider/schemas/`). Nunca interpretar texto livre de
+  IA diretamente em um module — se precisar de um novo tipo de análise, criar um novo
+  schema, não reaproveitar um schema existente pra outra finalidade.
+- Trabalho pesado/assíncrono (chamadas de IA em lote, sync com APIs externas, scraping)
+  entra em fila (BullMQ, `shared/queue/queues.js`) e roda em worker (`src/jobs/`), nunca
+  de forma síncrona dentro de uma rota HTTP.
+- Frontend: React + Vite, sem framework de UI (Tailwind, MUI etc.) sem confirmar antes.
+  Tema visual definido em `apps/web/src/styles.css` — navy escuro (#0E1526), Space Grotesk
+  (headers) + Inter (corpo) + JetBrains Mono (números). Manter esse padrão.
+- Módulos ainda não implementados (`discovery`, `market-intel`, `competitive-intel`) têm
+  stubs propositais que lançam erro claro apontando pra fase do roadmap — não "completar"
+  esses módulos silenciosamente sem antes checar `docs/ARQUITETURA.md` seção 8 e 9.
+- Todo texto de interface e commit em português (pt-BR).
+
+## O que evitar
+
+- Não implementar Módulo 3 (competitive-intel) de verdade sem a decisão de fonte de dado
+  confirmada (ver `docs/ARQUITETURA.md` seção 9, item 1) — scraping direto de landing
+  pages/anúncios de terceiros é frágil e pode violar termos de uso.
+- Não deixar a IA executar ações automaticamente (pausar campanha, mudar orçamento no
+  Google Ads). Ela sempre recomenda; a ação é manual ou confirmada explicitamente.
+- Não commitar `.env` nem dados de `infra/**/data`.
+- Não trocar Postgres por outro banco, nem tirar a fila (BullMQ/Redis) do meio do fluxo de
+  IA/sync, sem que seja pedido explicitamente — isso é decisão de arquitetura, não detalhe
+  de implementação.
