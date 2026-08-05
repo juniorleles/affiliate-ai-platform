@@ -10,6 +10,7 @@ import AlertsPage from './features/monitoring/AlertsPage';
 import ProductsPage from './features/discovery/ProductsPage';
 import MarketIntelPage from './features/market-intel/MarketIntelPage';
 import CompetitiveIntelPage from './features/competitive-intel/CompetitiveIntelPage';
+import CampaignDraftsPage from './features/google-ads/CampaignDraftsPage';
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(!!getAdminKey());
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/market-intel" element={<MarketIntelPage />} />
         <Route path="/competitive-intel" element={<CompetitiveIntelPage />} />
+        <Route path="/campaign-drafts" element={<CampaignDraftsPage />} />
       </Routes>
     </Layout>
   );

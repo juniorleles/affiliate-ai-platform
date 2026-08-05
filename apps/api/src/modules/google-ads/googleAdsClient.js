@@ -1,30 +1,50 @@
 const { GoogleAdsApi } = require('google-ads-api');
 
-function getCustomer() {
-  const requiredVars = [
-    'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET',
-    'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID',
-  ];
+// Cliente reaproveitado entre chamadas — a credencial de app (client_id/secret/
+// developer_token) é sempre a mesma, só customer_id/refresh_token/login_customer_id
+// mudam por conta (Fase 7, suporte multi-conta, 2026-08-05).
+let sharedClient = null;
+function getClient() {
+  if (sharedClient) return sharedClient;
+
+  const requiredVars = ['GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_DEVELOPER_TOKEN'];
   const missing = requiredVars.filter(v => !process.env[v]);
   if (missing.length) {
     throw new Error(`Credenciais do Google Ads ausentes no .env: ${missing.join(', ')}`);
   }
 
-  const client = new GoogleAdsApi({
+  sharedClient = new GoogleAdsApi({
     client_id: process.env.GOOGLE_ADS_CLIENT_ID,
     client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET,
     developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
   });
+  return sharedClient;
+}
 
-  return client.Customer({
-    customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID,
-    login_customer_id: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || undefined,
-    refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN,
+/**
+ * Monta o cliente pra uma conta específica. `account` é opcional — sem ele,
+ * cai pro comportamento antigo (conta única via .env), pra não quebrar nada
+ * que já funciona. Com `account` (linha de `google_ads_accounts`), usa os
+ * dados daquela conta específica — suporte multi-conta, Fase 7.
+ */
+function getCustomer(account) {
+  const customerId = account?.customer_id || process.env.GOOGLE_ADS_CUSTOMER_ID;
+  const loginCustomerId = account?.login_customer_id || process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || undefined;
+  const refreshToken = account?.refresh_token || process.env.GOOGLE_ADS_REFRESH_TOKEN;
+
+  if (!customerId || !refreshToken) {
+    throw new Error('customer_id e refresh_token são obrigatórios (via conta específica ou .env).');
+  }
+
+  return getClient().Customer({
+    customer_id: customerId,
+    login_customer_id: loginCustomerId,
+    refresh_token: refreshToken,
   });
 }
 
-async function fetchCampaignMetrics() {
-  const customer = getCustomer();
+async function fetchCampaignMetrics(account) {
+  const customer = getCustomer(account);
 
   const rows = await customer.query(`
     SELECT
@@ -51,16 +71,57 @@ async function fetchCampaignMetrics() {
   }));
 }
 
-/**
- * Retorna o código de moeda da conta (ex: 'BRL', 'USD', 'EUR') — necessário
- * pra comparar CPC de leilão com valores de comissão em outra moeda sem
- * comparar maçã com laranja (bug real encontrado em 2026-08-04, ver
- * docs/ARQUITETURA.md).
- */
-async function fetchAccountCurrency() {
-  const customer = getCustomer();
+async function fetchAccountCurrency(account) {
+  const customer = getCustomer(account);
   const rows = await customer.query('SELECT customer.currency_code FROM customer LIMIT 1');
   return rows?.[0]?.customer?.currency_code ?? null;
 }
 
-module.exports = { fetchCampaignMetrics, fetchAccountCurrency };
+/**
+ * Status real da conta (Fase 7, Parte A — detecção de suspensão). GAQL não
+ * expõe "suspended" como um campo simples e universal em todas as versões da
+ * API — usamos customer.status, que cobre ENABLED/CANCELED/SUSPENDED/CLOSED.
+ * Se a query falhar (ex: versão da API não suporta o campo), quem chamar
+ * precisa tratar isso como "não foi possível confirmar", não como "ativo".
+ */
+async function fetchAccountStatus(account) {
+  const customer = getCustomer(account);
+  const rows = await customer.query('SELECT customer.status FROM customer LIMIT 1');
+  return rows?.[0]?.customer?.status ?? null;
+}
+
+/**
+ * Status de aprovação de cada anúncio ativo (Fase 7, Parte A — detecção real
+ * de reprovação, que a tabela `alerts` previa desde o início mas nunca tinha
+ * sido implementada). Mesma ressalva de sempre: nomes de campo não 100%
+ * confirmados contra conta real — parsing defensivo, loga aviso se vier
+ * vazio quando não deveria.
+ */
+async function fetchAdApprovalStatuses(account) {
+  const customer = getCustomer(account);
+
+  const rows = await customer.query(`
+    SELECT
+      ad_group_ad.ad.id, ad_group_ad.status,
+      ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.review_status,
+      campaign.id, campaign.name
+    FROM ad_group_ad
+    WHERE ad_group_ad.status != 'REMOVED'
+  `);
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    console.warn('[google-ads] fetchAdApprovalStatuses não retornou nenhum anúncio — pode ser normal (nenhum anúncio ativo) ou sinal de campo errado na query.');
+    return [];
+  }
+
+  return rows.map(r => ({
+    adId: String(r.ad_group_ad?.ad?.id ?? ''),
+    adStatus: r.ad_group_ad?.status ?? null,
+    approvalStatus: r.ad_group_ad?.policy_summary?.approval_status ?? null,
+    reviewStatus: r.ad_group_ad?.policy_summary?.review_status ?? null,
+    campaignId: String(r.campaign?.id ?? ''),
+    campaignName: r.campaign?.name ?? null,
+  })).filter(a => a.adId);
+}
+
+module.exports = { getClient, getCustomer, fetchCampaignMetrics, fetchAccountCurrency, fetchAccountStatus, fetchAdApprovalStatuses };

@@ -1,6 +1,8 @@
 const express = require('express');
 const { requireAdmin } = require('../../shared/auth/middleware');
 const service = require('./service');
+const campaignDrafts = require('./campaignDrafts');
+const aiAdvisor = require('../ai-advisor/service');
 
 const router = express.Router();
 
@@ -65,6 +67,87 @@ router.get('/account-currency', requireAdmin, async (req, res) => {
   try {
     const currency = await service.getAccountCurrency();
     res.json({ currency });
+  } catch (err) { handleServiceError(res, err); }
+});
+
+// Contas do Google Ads (Fase 7, suporte multi-conta)
+router.get('/accounts', requireAdmin, async (req, res) => {
+  const accounts = await service.listAccounts();
+  res.json({ accounts });
+});
+
+router.post('/accounts', requireAdmin, async (req, res) => {
+  try {
+    const account = await service.addAccount(req.body);
+    res.status(201).json({ account });
+  } catch (err) { handleServiceError(res, err); }
+});
+
+router.post('/accounts/refresh-status', requireAdmin, async (req, res) => {
+  const results = await service.refreshAllAccountStatuses();
+  res.json({ results });
+});
+
+// --- Fase 6: rascunhos de campanha ---
+
+router.post('/drafts', requireAdmin, async (req, res) => {
+  try {
+    const result = await campaignDrafts.createDraft(req.body);
+    res.status(201).json(result);
+  } catch (err) { handleServiceError(res, err); }
+});
+
+router.get('/drafts', requireAdmin, async (req, res) => {
+  const drafts = await campaignDrafts.listDrafts();
+  res.json({ drafts });
+});
+
+router.get('/drafts/:id', requireAdmin, async (req, res) => {
+  const draft = await campaignDrafts.findDraftById(req.params.id);
+  if (!draft) return res.status(404).json({ error: 'Rascunho não encontrado.' });
+  res.json({ draft });
+});
+
+router.post('/drafts/:id/approve', requireAdmin, async (req, res) => {
+  try {
+    const draft = await campaignDrafts.approveDraft(req.params.id);
+    res.json({ draft });
+  } catch (err) { handleServiceError(res, err); }
+});
+
+// Bookkeeping manual: você criou a campanha de verdade no Google Ads (com as
+// próprias mãos) usando este rascunho — marca aqui pra manter histórico.
+// Não chama nenhuma API do Google (decisão de 2026-08-05).
+router.post('/drafts/:id/mark-as-used', requireAdmin, async (req, res) => {
+  try {
+    const draft = await campaignDrafts.markAsUsed(req.params.id, req.body || {});
+    res.json({ draft });
+  } catch (err) { handleServiceError(res, err); }
+});
+
+// Texto formatado, pronto pra ler e digitar manualmente no Google Ads.
+router.get('/drafts/:id/copy-text', requireAdmin, async (req, res) => {
+  const draft = await campaignDrafts.findDraftById(req.params.id);
+  if (!draft) return res.status(404).json({ error: 'Rascunho não encontrado.' });
+  res.type('text/plain').send(campaignDrafts.formatDraftForCopy(draft));
+});
+
+// --- Fase 7, Parte A: revisão preventiva de compliance de anúncio ---
+router.post('/drafts/:id/review-policy', requireAdmin, async (req, res) => {
+  try {
+    const draft = await campaignDrafts.findDraftById(req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Rascunho não encontrado.' });
+
+    const headlines = Array.isArray(draft.headlines) ? draft.headlines : JSON.parse(draft.headlines || '[]');
+    const descriptions = Array.isArray(draft.descriptions) ? draft.descriptions : JSON.parse(draft.descriptions || '[]');
+
+    const result = await aiAdvisor.reviewAdPolicy({
+      subjectId: draft.id,
+      headline: headlines[0] || '',
+      description: descriptions[0] || '',
+      productContext: null,
+    });
+    res.json(result);
   } catch (err) { handleServiceError(res, err); }
 });
 

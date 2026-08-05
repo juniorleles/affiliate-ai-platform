@@ -419,12 +419,123 @@ async function analyzeLandingPageVisual({ productId, desktopBase64, mobileBase64
   return { analysis: saved, result };
 }
 
+const AD_COPY_SYSTEM_PROMPT = `
+Você é um redator publicitário sênior especializado em Google Ads (Responsive Search
+Ads). Sua tarefa é gerar headlines e descrições pra um anúncio, baseado nas
+informações reais do produto — nunca invente característica, benefício, número ou
+resultado que não foi fornecido no contexto.
+
+Responda SOMENTE com um objeto JSON válido, sem markdown, sem texto fora do JSON,
+seguindo exatamente o schema fornecido.
+
+Regras:
+- "headlines": gere exatamente 10 headlines, cada uma com NO MÁXIMO 30 caracteres
+  (limite real do Google Ads — conte os caracteres, não estime). Varie o ângulo:
+  benefício principal, urgência/oferta (só se houver base real pra isso no contexto),
+  nome do produto, palavra-chave principal.
+- "descriptions": gere exatamente 3 descrições, cada uma com NO MÁXIMO 90 caracteres.
+  Reforce o benefício e inclua uma chamada pra ação clara.
+- Exemplo da forma EXATA (preencha com copy real; respeite maxLength de cada string):
+  {"headlines":["H1 (≤30)","H2","...até 10"],"descriptions":["D1 (≤90)","D2","D3"],
+  "correspondence_check":{"aligned":true,"notes":"..."},"reasoning":"..."}
+- "correspondence_check": se o texto da landing page (texto_da_pagina) estiver
+  disponível no contexto, confirme que a copy gerada é coerente com o que a página
+  realmente entrega — "aligned: false" se você tiver que inventar algo que a página
+  não sustenta pra gerar uma headline chamativa.
+- "reasoning": no máximo 120 palavras, em português, explicando as escolhas.
+`.trim();
+
+/**
+ * Gera copy de anúncio (headlines/descriptions) pra um rascunho de campanha
+ * (Fase 6). Não persiste em ai_analyses com subject_id de produto — quem
+ * chama (campaignDrafts.js) decide onde gravar o resultado, porque isso é
+ * insumo de um rascunho, não uma "opinião" isolada sobre o produto.
+ */
+async function generateAdCopy({ product, pageText, keywords, economics }) {
+  const context = {
+    produto: { nome: product?.name, descricao: product?.description ?? null, categoria: product?.category ?? null },
+    palavras_chave: keywords || [],
+    economics: economics ? {
+      comissao_usada: Number(economics.comissao_usada),
+      status: economics.status,
+    } : null,
+    texto_da_pagina: pageText ? pageText.slice(0, 8000) : null,
+  };
+
+  const { result, model, provider } = await aiProvider.analyze({
+    schema: 'adCopySuggestion',
+    systemPrompt: AD_COPY_SYSTEM_PROMPT,
+    context,
+    // 15 headlines + 4 descriptions + correspondence + reasoning cabem folgado
+    // em ~3–4k tokens; 2048 truncava o JSON no meio (achado 2026-08-05).
+    maxTokens: 4096,
+  });
+
+  return { result, model, provider };
+}
+
+const AD_POLICY_REVIEW_SYSTEM_PROMPT = `
+Você é um especialista em políticas de anúncio do Google Ads, revisando um anúncio
+ANTES de ele ser publicado, pra prevenir reprovação/bloqueio. Considere políticas
+comuns: alegações de saúde sem comprovação, superlativos não sustentáveis ("melhor
+do mundo", "cura garantida"), uso indevido de marca de terceiro, linguagem de
+clickbait, promessas de resultado financeiro/de emagrecimento específico.
+
+Responda SOMENTE com um objeto JSON válido, sem markdown, sem texto fora do JSON,
+seguindo exatamente o schema fornecido.
+
+Regras:
+- "risk_level": "high" se houver alegação que tipicamente é banida direto (cura,
+  resultado garantido, comparação médica não comprovada). "medium" pra linguagem
+  arriscada mas não automaticamente banida. "low" se não identificar problema.
+- "likely_to_be_approved": sua melhor estimativa, não uma garantia — deixe isso
+  claro no reasoning.
+- "issues_found": cada item aponta o texto específico problemático (não genérico),
+  a área de política provável (ex: "alegações de saúde", "uso de marca"), e uma
+  recomendação prática de como reescrever.
+- "reasoning": no máximo 100 palavras, em português, direto.
+`.trim();
+
+/**
+ * Revisão preventiva de compliance de anúncio (Fase 7, Parte A) — complementa
+ * a classificação de nicho (5.3), mas revisa o TEXTO EXATO do anúncio, não só
+ * a categoria do produto.
+ */
+async function reviewAdPolicy({ subjectId, headline, description, productContext }) {
+  const context = {
+    headline, description,
+    produto: productContext ? { nome: productContext.name, categoria: productContext.category } : null,
+  };
+
+  const { result, model, provider } = await aiProvider.analyze({
+    schema: 'adPolicyReview',
+    systemPrompt: AD_POLICY_REVIEW_SYSTEM_PROMPT,
+    context,
+  });
+
+  const saved = await repo.recordAnalysis({
+    subjectType: 'campaign_draft',
+    subjectId,
+    questionType: 'ad_policy_review',
+    provider,
+    model,
+    verdict: result.risk_level,
+    confidence: result.likely_to_be_approved ? 'medium' : 'low',
+    response: result,
+    reasoning: result.reasoning,
+  });
+
+  return { analysis: saved, result };
+}
+
 module.exports = {
   analyzeCampaignBudget,
   classifyProductCompliance,
   evaluateProductOpportunity,
   analyzeLandingPageText,
   analyzeLandingPageVisual,
+  generateAdCopy,
+  reviewAdPolicy,
   getHistory: repo.getHistory,
   getLatest: repo.getLatest,
   recordOutcome: repo.recordOutcome,

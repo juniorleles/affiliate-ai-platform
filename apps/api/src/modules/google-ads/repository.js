@@ -58,7 +58,7 @@ async function listCampaignsWithMetrics() {
 
 async function getAffiliateStatsByCampaignName() {
   const { rows } = await pool.query(`
-    SELECT LOWER(cl.utm_campaign) AS campaign_name,
+    SELECT cl.utm_campaign AS campaign_name,
       COUNT(DISTINCT cv.id) AS conversions,
       COALESCE(SUM(cv.value), 0) AS revenue
     FROM clicks cl
@@ -151,6 +151,35 @@ async function getLatestKeywordMetrics(productId) {
   return rows;
 }
 
+// --- Contas do Google Ads (Fase 7, suporte multi-conta, 2026-08-05) ---
+
+async function listAccounts() {
+  const { rows } = await pool.query('SELECT * FROM google_ads_accounts ORDER BY is_default DESC, name');
+  return rows;
+}
+
+async function findAccountById(id) {
+  const { rows } = await pool.query('SELECT * FROM google_ads_accounts WHERE id = $1', [id]);
+  return rows[0] || null;
+}
+
+async function createAccount({ customerId, name, loginCustomerId, isDefault }) {
+  const { rows } = await pool.query(
+    `INSERT INTO google_ads_accounts (customer_id, name, login_customer_id, is_default)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [customerId, name || null, loginCustomerId || null, !!isDefault]
+  );
+  return rows[0];
+}
+
+async function updateAccountStatus(id, status) {
+  const { rows } = await pool.query(
+    'UPDATE google_ads_accounts SET status = $2 WHERE id = $1 RETURNING *',
+    [id, status]
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   upsertCampaignsAndMetrics,
   listCampaignsWithMetrics,
@@ -163,4 +192,8 @@ module.exports = {
   listAllCampaigns,
   insertKeywordMetrics,
   getLatestKeywordMetrics,
+  listAccounts,
+  findAccountById,
+  createAccount,
+  updateAccountStatus,
 };

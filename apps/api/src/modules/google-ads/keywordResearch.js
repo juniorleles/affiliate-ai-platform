@@ -13,30 +13,8 @@
  * números vierem null onde não deveriam.
  */
 
-const { GoogleAdsApi, services } = require('google-ads-api');
-
-function getCustomer() {
-  const requiredVars = [
-    'GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET',
-    'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID',
-  ];
-  const missing = requiredVars.filter(v => !process.env[v]);
-  if (missing.length) {
-    throw new Error(`Credenciais do Google Ads ausentes no .env: ${missing.join(', ')}`);
-  }
-
-  const client = new GoogleAdsApi({
-    client_id: process.env.GOOGLE_ADS_CLIENT_ID,
-    client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET,
-    developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN,
-  });
-
-  return client.Customer({
-    customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID,
-    login_customer_id: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || undefined,
-    refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN,
-  });
-}
+const { services } = require('google-ads-api');
+const { getCustomer } = require('./googleAdsClient');
 
 const COMPETITION_MAP = { LOW: 'low', MEDIUM: 'medium', HIGH: 'high' };
 
@@ -57,10 +35,10 @@ function normalizeIdea(idea) {
   };
 }
 
-async function fetchKeywordIdeas({ seedKeyword, locationIds, languageId, pageSize = 20 }) {
+async function fetchKeywordIdeas({ seedKeyword, locationIds, languageId, pageSize = 20, account }) {
   if (!seedKeyword) throw new Error('seedKeyword é obrigatório.');
 
-  const customer = getCustomer();
+  const customer = getCustomer(account);
   const keywordSeed = new services.KeywordSeed({ keywords: [seedKeyword] });
 
   const requestPayload = {

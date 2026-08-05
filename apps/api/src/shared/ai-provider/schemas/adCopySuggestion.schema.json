@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "adCopySuggestion",
+  "type": "object",
+  "required": ["headlines", "descriptions", "correspondence_check", "reasoning"],
+  "additionalProperties": false,
+  "properties": {
+    "headlines": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 15,
+      "items": { "type": "string", "maxLength": 30 }
+    },
+    "descriptions": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": { "type": "string", "maxLength": 90 }
+    },
+    "correspondence_check": {
+      "type": "object",
+      "required": ["aligned", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "aligned": { "type": "boolean" },
+        "notes": { "type": "string" }
+      }
+    },
+    "reasoning": { "type": "string", "maxLength": 800 }
+  }
+}

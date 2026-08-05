@@ -40,7 +40,7 @@ async function complete({ systemPrompt, userPrompt, model = DEFAULT_MODEL, maxTo
     .map(block => block.text)
     .join('');
 
-  return { text, model, provider: 'claude' };
+  return { text, model, provider: 'claude', stopReason: response.stop_reason };
 }
 
 module.exports = { complete, DEFAULT_MODEL };

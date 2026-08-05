@@ -1,12 +1,12 @@
 # Arquitetura — Plataforma Privada de IA para Marketing de Afiliados
 
-Versão 2.2 · Documento vivo (atualizar a cada mudança estrutural relevante)
+Versão 2.4 · Documento vivo (atualizar a cada mudança estrutural relevante)
 
 Changelog:
-- v2.2 adicionou a Fase 6 (Cadastro de Campanhas no Google Ads) e a Fase 7 (Gestor
-  de Contingência) ao roadmap — especificação inicial, sem código ainda, 3 decisões
-  novas registradas na seção 10. Marca a primeira vez que o sistema consideraria
-  executar ação real (criar campanha) em vez de só recomendar.
+- v2.4 removeu a escrita automática no Google Ads da Fase 6 (decisão do usuário) —
+  `campaignBuilder.js` deletado, fluxo virou "rascunho pronto pra copiar" (texto
+  formatado + botão de copiar), criação da campanha sempre manual pelo usuário.
+  Reduz o risco técnico do projeto significativamente sem perder valor real.
 - v1.4 removeu formalmente a descoberta automática de produtos do escopo do projeto
   (decisão do usuário) — connector Digistore24 e rota de sync automático deletados do
   código; Fase 2 e Fase 5 reescritas pra refletir cadastro manual como caminho definitivo,
@@ -691,88 +691,111 @@ agora é só usar o cadastro manual que já existe, sem código novo.
 
 ---
 
-### Fase 6 — Cadastro de Campanhas no Google Ads
-**Status: 📋 planejada (2026-08-05) — especificação inicial, decisões em aberto,
-sem código.**
+### Fase 6 — Rascunho de Campanha (criação manual pelo usuário)
+**Status: 🟡 código completo (2026-08-05), ⏳ pendente de teste real. Risco bem
+menor que a versão original — decisão de 2026-08-05 removeu a escrita
+automática no Google Ads antes mesmo do primeiro teste.**
 
-- Objetivo: fechar o loop que hoje para em "vale a pena anunciar?" (Fase 3b). A
-  campanha nasce já com os números que Economics (5.1) e Keyword Research (5.2)
-  calcularam — CPC máximo, orçamento inicial sugerido, palavras-chave reais com
-  volume/competição — em vez de você digitar tudo de novo manualmente no Google Ads.
-- **Princípio central (não negociável, ver seção 1)**: o sistema **nunca cria
-  campanha automaticamente**. Gera um **rascunho** (gravado no banco), você revisa
-  na tela, e só cria de verdade no Google Ads com confirmação explícita. Isso é
-  a primeira vez que o sistema executaria uma ação real com dinheiro real — o
-  padrão de "recomendação, nunca execução automática" que seguimos o projeto
-  inteiro fica ainda mais crítico aqui.
-- Escopo previsto:
-  - Tabela nova `campaign_drafts` (product_id, nome, orçamento diário proposto,
-    moeda, palavras-chave propostas — reaproveitando `keyword_metrics` já
-    coletado na Fase 2b —, sugestões de headline/descrição, `final_url`, status:
-    `draft` → `approved` → `created_in_google_ads` → `failed`, `google_campaign_id`
-    preenchido só depois da criação real).
-  - Sugestão de copy do anúncio via IA, **checando correspondência com a Landing
-    Page** — reaproveita a mesma lógica já validada no Auditor de LP (Fase 3d,
-    seção 5.4) pra não nascer um anúncio que promete o que a página não entrega.
-  - Criação real via API do Google Ads: sequência encadeada (orçamento → campanha
-    → grupo de anúncios → palavras-chave → anúncio), cada chamada dependendo do
-    ID da anterior — mais complexo que qualquer coisa que já fizemos (leitura é
-    simples, escrita tem bem mais regra de negócio própria do Google Ads).
-- Decisões em aberto antes de implementar (ver seção 10, itens novos):
-  9. Orçamento diário/mensal máximo — trava dura que nunca pode ser ultrapassada,
-     mesmo que a Economics sugira mais?
-  10. Copy do anúncio: IA sugere (com revisão sua) ou você escreve e o sistema só
-      cuida da estrutura (orçamento/palavras-chave)?
-- Checklist de teste: (definir quando as decisões acima forem resolvidas)
-- Definição de pronto: criar 1 campanha real, pequena, a partir de um rascunho
-  revisado por você, e ela aparecer certinha no Google Ads (mesmos dados do
-  rascunho, sem surpresa).
+- Objetivo: fechar o loop que hoje para em "vale a pena anunciar?" (Fase 3b),
+  sem o sistema precisar escrever no Google Ads. A IA prepara orçamento
+  validado, palavras-chave reais (Fase 2b) e copy de anúncio (checada contra a
+  LP real, Fase 3d) — você mesmo cria a campanha copiando esses dados pra
+  dentro do Google Ads.
+- **Decisão revisada em 2026-08-05**: a versão original desta fase previa o
+  sistema criar a campanha de verdade via API (`campaignBuilder.js`, sequência
+  orçamento → campanha → grupo → keywords → anúncio). O usuário decidiu que
+  prefere criar manualmente — **essa parte foi removida do código**, não
+  deixada como opção não usada. Motivo: elimina de propósito a parte de maior
+  risco do projeto (escrita real no Google Ads, nunca testada) sem perder o
+  valor real (decidir orçamento/keywords/copy continua automatizado).
+- Fluxo agora: `POST /drafts` (gera rascunho) → `POST /drafts/:id/approve`
+  (revisão) → você cria manualmente no Google Ads, usando o texto formatado de
+  `GET /drafts/:id/copy-text` → `POST /drafts/:id/mark-as-used` (bookkeeping
+  manual, não chama nenhuma API do Google).
+- Decisões da seção 10 aplicadas (2026-08-05):
+  9. Orçamento máximo: **R$ 100/dia** (topo da faixa R$ 50–100 escolhida) —
+     `MAX_DAILY_BUDGET_HARD_CAP` no `.env`, validado em `createDraft()` antes de
+     gravar o rascunho.
+  10. Copy do anúncio: **IA sugere, usuário revisa** — `generateAdCopy()`,
+      schema `adCopySuggestion`, checa correspondência com o texto real da LP.
+- Escopo implementado:
+  - `campaign_drafts` (migration 014).
+  - `google-ads/campaignDrafts.js` — orquestra o rascunho + `formatDraftForCopy()`
+    (texto simples, pronto pra ler e digitar no Google Ads).
+  - Frontend: `CampaignDraftsPage`, `CampaignDraftModal`, `CampaignDraftDetail`
+    (com botão "Copiar tudo" e aprovação/marcação de uso).
+- Checklist de teste (nenhum item testado ainda):
+  - [ ] Criar 1 rascunho real e revisar se copy/keywords fazem sentido
+  - [ ] Confirmar que orçamento acima de R$ 100/dia é rejeitado antes de gravar
+  - [ ] Aprovar o rascunho, copiar o texto formatado, criar a campanha manualmente
+    no Google Ads, e marcar como usado
+  - [ ] Conferir se o texto de `copy-text` está genuinamente fácil de usar (não
+    só tecnicamente correto) — isso é uma tela pra você usar de verdade, vale
+    o teste de usabilidade, não só de funcionamento
+- Definição de pronto: gerar 1 rascunho real, usar o texto pra criar a
+  campanha manualmente no Google Ads sem precisar digitar nada que o sistema
+  já não tivesse preparado.
+- **Endpoints**: `POST /api/campaigns/drafts`, `GET /api/campaigns/drafts`,
+  `GET /api/campaigns/drafts/:id`, `GET /api/campaigns/drafts/:id/copy-text`,
+  `POST /api/campaigns/drafts/:id/approve`, `POST /api/campaigns/drafts/:id/mark-as-used`
 
 ---
 
 ### Fase 7 — Gestor de Contingência
-**Status: 📋 planejada (2026-08-05) — especificação inicial, decisões em aberto,
-sem código.**
+**Status: 🟡 Parte A implementada (2026-08-05), ⏳ pendente de teste real. Parte
+B (diagnóstico + rascunho de apelação) ainda não implementada.**
 
 Duas partes de natureza bem diferente — importante não misturar expectativa.
 
-**Parte A — Revisão preventiva de anúncio (viável de verdade).**
+**Parte A — Revisão preventiva de anúncio (implementada).**
 - Objetivo: revisar o texto exato do anúncio contra políticas reais do Google Ads
-  (alegação sem comprovação, superlativo problemático, uso indevido de marca) antes
-  de publicar — não depois de tomar reprovação. Estende o Compliance (5.3), que
-  hoje classifica só o nicho do produto, não o texto específico do anúncio.
-- Também fecha uma lacuna real: a tabela `alerts` já previa o tipo `ad_disapproved`
-  desde o desenho original (migration 004), mas isso **nunca foi implementado** —
-  só `campaign_paused` e `impression_drop` existem de verdade hoje. O Google Ads
-  expõe via API o status de aprovação de cada anúncio e o motivo da reprovação —
-  é extensão natural do `monitoring` que já roda.
-- Escopo previsto: novo schema de IA (`adPolicyReview` ou similar) reaproveitando
-  o padrão `ai-advisor`; extensão do `monitoring/service.js` pra consultar status
-  de aprovação de anúncio via GAQL e gerar alerta `ad_disapproved` de verdade.
+  antes de publicar — não depois de tomar reprovação. Estende o Compliance (5.3),
+  que classifica só o nicho do produto, não o texto específico do anúncio.
+- Escopo implementado:
+  - `ai-advisor/service.js#reviewAdPolicy()`, schema `adPolicyReview` — avalia
+    risco (`low`/`medium`/`high`), estimativa de aprovação, problemas específicos
+    com recomendação de reescrita.
+  - `monitoring/service.js#checkAdDisapprovals()` — **fecha uma lacuna real**: a
+    tabela `alerts` previa o tipo `ad_disapproved` desde a migration 004, mas
+    nunca tinha sido implementado (só `campaign_paused` e `impression_drop`
+    existiam de verdade). Agora consulta `ad_group_ad.policy_summary` via GAQL a
+    cada checagem de monitoramento e gera alerta real quando encontra
+    `DISAPPROVED`.
+  - `google-ads/googleAdsClient.js#fetchAdApprovalStatuses()` — mesma ressalva
+    de sempre: nomes de campo não confirmados contra conta real ainda, parsing
+    defensivo com aviso no console se vier vazio.
+- Base multi-conta implementada junto (necessária pra Parte B, mas já ativa
+  aqui): `google_ads_accounts` ganhou `login_customer_id`, `is_default`,
+  `status` (migration 014); `googleAdsClient.js` inteiro refatorado pra aceitar
+  conta específica em vez de só ler do `.env` — **retrocompatível**, sem conta
+  especificada cai no comportamento antigo (conta única via `.env`).
+- Checklist de teste:
+  - [ ] `POST /api/campaigns/drafts/:id/review-policy` num rascunho real,
+    testar com copy "limpa" e copy propositalmente arriscada (ex: "cura
+    garantida"), confirmar que o `risk_level` diferencia os dois casos
+  - [ ] Rodar checagem de monitoramento numa conta com anúncio de teste reprovado
+    (se tiver como simular) e confirmar que gera alerta `ad_disapproved`
+  - [ ] Cadastrar uma segunda conta via `POST /api/campaigns/accounts` e
+    confirmar que `GET /api/campaigns` funciona pra ela também (não só a
+    default do `.env`)
 
-**Parte B — Diagnóstico e apelação (limite real, não é "resgate automático").**
+**Parte B — Diagnóstico e apelação (não implementada ainda).**
 - ⚠️ **Não existe automação possível pra desbloquear conta.** Suspensão de conta
-  no Google Ads só se resolve pelo processo de apelação do próprio Google (recurso
-  formal, revisão humana do lado deles) — não existe endpoint de API pra isso.
-  Nenhuma automação (nossa ou de terceiro) pula essa etapa. Registrar isso aqui
-  pra não a expectativa errada voltar numa conversa futura.
-- O que dá pra construir de verdade:
-  1. Detecção rápida de mudança de status da **conta** (não só campanha) via
-     monitoring.
-  2. Diagnóstico assistido por IA: juntar histórico de compliance + anúncios
-     reprovados recentes, gerar hipótese de causa provável.
-  3. Rascunho de texto de apelação — a IA prepara, você revisa e envia manualmente
-     pelo formulário oficial do Google.
-- Decisão em aberto antes de implementar (ver seção 10, item novo):
-  11. Você já tem mais de uma conta de anúncio hoje, ou é uma única conta por
-      enquanto? O sistema inteiro hoje está fixado numa conta só via `.env`
-      (`GOOGLE_ADS_CUSTOMER_ID`) — múltiplas contas mudaria bastante o desenho
-      do banco (a tabela `google_ads_accounts` já existe desde o início, mas
-      nunca foi usada pra mais de 1 conta de verdade).
-- Checklist de teste: (definir quando as decisões acima forem resolvidas)
-- Definição de pronto: Parte A rodando num anúncio real antes de publicar; Parte B
-  gerando um diagnóstico + rascunho de apelação úteis o suficiente pra você usar
-  de verdade, sem prometer resultado da apelação em si (isso depende do Google).
+  no Google Ads só se resolve pelo processo de apelação do próprio Google — não
+  existe endpoint de API pra isso. Registrado aqui pra não a expectativa errada
+  voltar numa conversa futura.
+- O que ainda falta construir: diagnóstico assistido por IA (juntar histórico de
+  compliance + anúncios reprovados recentes, gerar hipótese de causa provável) e
+  rascunho de texto de apelação (você revisa e envia manualmente).
+- Decisão da seção 10 aplicada (2026-08-05): item 11 — **mais de uma conta,
+  já ou em breve** — motivo pelo qual a base multi-conta foi construída junto
+  com a Parte A, não deixada pra depois.
+- Definição de pronto (Parte B): diagnóstico + rascunho de apelação úteis o
+  suficiente pra você usar de verdade, sem prometer resultado da apelação em
+  si (isso depende do Google).
+- **Endpoints (Parte A)**: `POST /api/campaigns/drafts/:id/review-policy`,
+  `GET /api/campaigns/accounts`, `POST /api/campaigns/accounts`,
+  `POST /api/campaigns/accounts/refresh-status`
 
 ---
 
@@ -810,16 +833,17 @@ Duas partes de natureza bem diferente — importante não misturar expectativa.
 8. ~~(Novo, 2026-08-04) Nível 1 e Nível 2 da Auditoria de LP convivem, ou o Nível 2
    substitui o Nível 1?~~ **RESOLVIDO em 2026-08-04** (aplicado na prática, Fase 3c):
    convivem — Nível 1 no cadastro rápido, Nível 2 como ação separada sob demanda.
-9. **(Novo, 2026-08-05) Orçamento máximo — Fase 6.** Trava dura de orçamento
-   diário/mensal que o cadastro de campanha nunca pode ultrapassar, mesmo que a
-   Economics sugira mais? Se sim, qual valor?
-10. **(Novo, 2026-08-05) Copy do anúncio — Fase 6.** A IA sugere headline/descrição
-    (com sua revisão antes de publicar), ou você escreve e o sistema só cuida da
-    estrutura (orçamento/palavras-chave)?
-11. **(Novo, 2026-08-05) Single ou multi-conta de anúncio — Fase 7.** Você já tem
-    mais de uma conta do Google Ads hoje, ou é uma só por enquanto? Muda o desenho
-    do Gestor de Contingência (Parte B) e de como usamos a tabela
-    `google_ads_accounts`, que já existe mas nunca foi usada pra mais de 1 conta.
+9. ~~(Novo, 2026-08-05) Orçamento máximo — Fase 6.~~ **RESOLVIDO em 2026-08-05**:
+   R$ 50–100/dia (faixa escolhida) — implementado com teto de **R$ 100/dia**
+   (`MAX_DAILY_BUDGET_HARD_CAP`), trava dura, não ajustável por chamada.
+10. ~~(Novo, 2026-08-05) Copy do anúncio — Fase 6.~~ **RESOLVIDO em 2026-08-05**:
+    IA sugere, usuário revisa antes de aprovar — implementado
+    (`generateAdCopy()`, schema `adCopySuggestion`).
+11. ~~(Novo, 2026-08-05) Single ou multi-conta de anúncio — Fase 7.~~
+    **RESOLVIDO em 2026-08-05**: mais de uma conta, já ou em breve — base
+    multi-conta implementada (`google_ads_accounts` completa, `googleAdsClient.js`
+    refatorado pra aceitar conta específica, retrocompatível com o `.env` único
+    de antes).
 
 Assim que você responder as pendentes, eu fecho os detalhes de implementação da próxima fase e a
 gente parte pro Cursor com escopo bem definido.

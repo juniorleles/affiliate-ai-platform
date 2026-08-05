@@ -63,8 +63,20 @@ async function analyze({ schema, systemPrompt, context, provider, model, maxToke
   const userPrompt = JSON.stringify(context);
 
   async function callAndValidate(extraInstruction) {
-    const finalSystemPrompt = extraInstruction ? `${systemPrompt}\n\n${extraInstruction}` : systemPrompt;
-    const { text, model: usedModel, provider: usedProvider } = await adapter.complete({
+    // Injeta o JSON Schema no system prompt — sem isso a IA inventa chaves ou
+    // devolve markdown; achado real em 2026-08-05 (LP audit / ad copy).
+    const schemaInstruction =
+      'Responda SOMENTE com um único objeto JSON válido (sem markdown, sem texto fora do JSON) ' +
+      'que obedeça EXATAMENTE a este JSON Schema (additionalProperties=false — não invente chaves):\n' +
+      JSON.stringify(schemaDef);
+
+    const finalSystemPrompt = [
+      systemPrompt,
+      schemaInstruction,
+      extraInstruction || null,
+    ].filter(Boolean).join('\n\n');
+
+    const { text, model: usedModel, provider: usedProvider, stopReason } = await adapter.complete({
       systemPrompt: finalSystemPrompt,
       userPrompt,
       model,
@@ -76,7 +88,10 @@ async function analyze({ schema, systemPrompt, context, provider, model, maxToke
     try {
       parsed = JSON.parse(cleanJsonText(text));
     } catch (err) {
-      throw new Error(`Resposta da IA não é um JSON válido: ${text.slice(0, 200)}`);
+      const hint = stopReason === 'max_tokens'
+        ? ' (resposta truncada por max_tokens — aumente o limite desta chamada)'
+        : '';
+      throw new Error(`Resposta da IA não é um JSON válido${hint}: ${text.slice(0, 200)}`);
     }
 
     if (!validate(parsed)) {

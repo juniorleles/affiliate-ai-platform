@@ -1,5 +1,6 @@
 const repo = require('./repository');
 const googleAdsRepo = require('../google-ads/repository');
+const { fetchAdApprovalStatuses } = require('../google-ads/googleAdsClient');
 const { withContext } = require('../../shared/logger');
 
 const log = withContext('monitoring');
@@ -70,15 +71,50 @@ async function checkImpressionDrops() {
 }
 
 /**
+ * Detecção real de anúncio reprovado (Fase 7, Parte A) — a tabela `alerts` já
+ * previa o tipo `ad_disapproved` desde o desenho original (migration 004),
+ * mas isso nunca tinha sido implementado até agora.
+ */
+async function checkAdDisapprovals() {
+  let ads;
+  try {
+    ads = await fetchAdApprovalStatuses();
+  } catch (err) {
+    log.warn('Falha ao consultar status de aprovação de anúncios, pulando essa checagem:', { error: err.message });
+    return 0;
+  }
+
+  let alertsCreated = 0;
+  for (const ad of ads) {
+    if (ad.approvalStatus === 'DISAPPROVED') {
+      const alreadyOpen = await repo.hasOpenAlert('ad_disapproved', 'campaign', ad.campaignId);
+      if (!alreadyOpen) {
+        await repo.createAlert({
+          type: 'ad_disapproved',
+          severity: 'high',
+          subjectType: 'campaign',
+          subjectId: ad.campaignId,
+          message: `Anúncio reprovado na campanha "${ad.campaignName}" (ad id ${ad.adId}) — revisar antes de investir mais nela.`,
+        });
+        alertsCreated++;
+      }
+    }
+  }
+
+  return alertsCreated;
+}
+
+/**
  * Roda todas as verificações de monitoramento. Chamado pelo n8n (via rota interna)
  * ou pelo worker de fila (ver src/jobs/monitoring.worker.js).
  */
 async function runAllChecks() {
   const statusAlerts = await checkCampaignStatusChanges();
   const impressionAlerts = await checkImpressionDrops();
-  const total = statusAlerts + impressionAlerts;
+  const adDisapprovalAlerts = await checkAdDisapprovals();
+  const total = statusAlerts + impressionAlerts + adDisapprovalAlerts;
   log.info(`Checagem concluída: ${total} alerta(s) novo(s).`);
-  return { total, statusAlerts, impressionAlerts };
+  return { total, statusAlerts, impressionAlerts, adDisapprovalAlerts };
 }
 
 module.exports = {

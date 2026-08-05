@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/products', label: 'Produtos' },
   { to: '/market-intel', label: 'Mercado' },
   { to: '/competitive-intel', label: 'Concorrência' },
+  { to: '/campaign-drafts', label: 'Rascunhos de Campanha' },
 ];
 
 export default function Layout({ children }) {

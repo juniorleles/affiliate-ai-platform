@@ -72,6 +72,15 @@ apareça pra alguma rede específica.
 
 ## O que evitar
 
+- **Fase 6 (rascunho de campanha) NUNCA escreve no Google Ads.** Decisão
+  explícita de 2026-08-05: o sistema só prepara o rascunho (orçamento validado,
+  keywords, copy da IA) — a criação da campanha é sempre manual, feita pelo
+  usuário copiando os dados. `campaignBuilder.js` (que faria a criação real via
+  API) foi **removido de propósito**, não deixado como opção não usada — não
+  reintroduzir isso sem pedido explícito do usuário. `MAX_DAILY_BUDGET_HARD_CAP`
+  continua validado em `createDraft()` mesmo sem escrita real — o orçamento no
+  rascunho precisa ser confiável pro usuário usar de verdade.
+
 - Módulo 3 (competitive-intel) é cadastro MANUAL, a partir do Google Ads Transparency
   Center (`adstransparency.google.com`) — decisão fechada em 2026-08-05 (seção 10,
   item 1). Nunca implementar scraper/automação pra isso — mesma regra do resto do

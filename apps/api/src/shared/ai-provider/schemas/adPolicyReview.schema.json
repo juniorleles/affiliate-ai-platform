@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "adPolicyReview",
+  "type": "object",
+  "required": ["risk_level", "likely_to_be_approved", "issues_found", "reasoning"],
+  "additionalProperties": false,
+  "properties": {
+    "risk_level": { "type": "string", "enum": ["low", "medium", "high"] },
+    "likely_to_be_approved": { "type": "boolean" },
+    "issues_found": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["issue", "policy_area", "recommendation"],
+        "additionalProperties": false,
+        "properties": {
+          "issue": { "type": "string" },
+          "policy_area": { "type": "string" },
+          "recommendation": { "type": "string" }
+        }
+      }
+    },
+    "reasoning": { "type": "string", "maxLength": 800 }
+  }
+}

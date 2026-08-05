@@ -1,4 +1,4 @@
-const { fetchCampaignMetrics, fetchAccountCurrency } = require('./googleAdsClient');
+const { fetchCampaignMetrics, fetchAccountCurrency, fetchAccountStatus } = require('./googleAdsClient');
 const keywordResearch = require('./keywordResearch');
 const repo = require('./repository');
 const discoveryRepo = require('../discovery/repository');
@@ -131,6 +131,32 @@ async function getAccountCurrency() {
   return fetchAccountCurrency();
 }
 
+// --- Contas do Google Ads (Fase 7, suporte multi-conta) ---
+
+async function addAccount({ customerId, name, loginCustomerId, isDefault }) {
+  if (!customerId) throw Object.assign(new Error('customerId é obrigatório.'), { status: 400 });
+  return repo.createAccount({ customerId, name, loginCustomerId, isDefault });
+}
+
+/**
+ * Consulta o status real de todas as contas cadastradas via API do Google Ads
+ * e atualiza no banco. Base da detecção de suspensão (Fase 7, Parte A).
+ */
+async function refreshAllAccountStatuses() {
+  const accounts = await repo.listAccounts();
+  const results = [];
+  for (const account of accounts) {
+    try {
+      const status = await fetchAccountStatus(account);
+      await repo.updateAccountStatus(account.id, status || 'unknown');
+      results.push({ accountId: account.id, name: account.name, status });
+    } catch (err) {
+      results.push({ accountId: account.id, name: account.name, error: err.message });
+    }
+  }
+  return results;
+}
+
 module.exports = {
   syncCampaigns,
   listCampaigns,
@@ -143,4 +169,7 @@ module.exports = {
   listAllCampaigns: repo.listAllCampaigns,
   getDailyMetrics: repo.getDailyMetrics,
   getAffiliateStatsForCampaign: repo.getAffiliateStatsForCampaign,
+  listAccounts: repo.listAccounts,
+  addAccount,
+  refreshAllAccountStatuses,
 };
