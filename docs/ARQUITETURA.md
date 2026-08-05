@@ -1,8 +1,19 @@
 # Arquitetura — Plataforma Privada de IA para Marketing de Afiliados
 
-Versão 1.2 · Documento vivo (atualizar a cada mudança estrutural relevante)
+Versão 2.2 · Documento vivo (atualizar a cada mudança estrutural relevante)
 
 Changelog:
+- v2.2 adicionou a Fase 6 (Cadastro de Campanhas no Google Ads) e a Fase 7 (Gestor
+  de Contingência) ao roadmap — especificação inicial, sem código ainda, 3 decisões
+  novas registradas na seção 10. Marca a primeira vez que o sistema consideraria
+  executar ação real (criar campanha) em vez de só recomendar.
+- v1.4 removeu formalmente a descoberta automática de produtos do escopo do projeto
+  (decisão do usuário) — connector Digistore24 e rota de sync automático deletados do
+  código; Fase 2 e Fase 5 reescritas pra refletir cadastro manual como caminho definitivo,
+  não fallback temporário.
+- v1.3 adicionou a Fase 3c (tela de cadastro de produtos, com diretrizes de UX) e a
+  Fase 3d (Auditor de LP avançado com IA — upgrade rico da seção 5.4, especificação
+  completa de CRO/UX/copywriting/correspondência Google Ads → LP recebida do usuário).
 - v1.1 incorporou o motor de viabilidade financeira (Economics), pesquisa de
   palavra-chave/leilão, compliance de produtor e auditoria de landing page — seção 5, nova.
 - v1.2 transformou a seção 9 (roadmap) numa checklist testável por fase: cada fase agora tem
@@ -20,9 +31,9 @@ Changelog:
   notificações pra Slack/e-mail, aprovações humanas) e "encadeamento entre sistemas externos".
   Toda regra de negócio (como calcular um score, quando pausar uma campanha, como validar
   resposta da IA) vive no backend, testável, versionada — nunca dentro de um nó do n8n.
-- **Fila para trabalho pesado.** Chamadas de IA, sincronização com APIs de redes de afiliados
-  e varredura de concorrentes são lentas, sujeitas a rate limit e podem falhar. Isso roda em
-  fila (BullMQ + Redis), nunca de forma síncrona dentro de uma requisição HTTP.
+- **Fila para trabalho pesado.** Chamadas de IA e varredura de concorrentes (quando a Fase 4
+  existir) são lentas, sujeitas a rate limit e podem falhar. Isso roda em fila (BullMQ +
+  Redis), nunca de forma síncrona dentro de uma requisição HTTP.
 - **Um contrato para "opinião de IA".** Toda resposta de IA (Claude ou OpenAI) que vira decisão
   de negócio passa por um schema validado antes de ser salva ou exibida — nunca texto livre
   interpretado "na confiança" pelo frontend.
@@ -216,48 +227,84 @@ Dois níveis, propositalmente separados:
 
 ### 5.4 Auditoria de landing page (dono: discovery)
 
-Dois tipos de checagem, de natureza bem diferente — importante não misturar:
+**Nível 1 — checagem técnica rápida (✅ implementada, Fase 3, 2026-08-04).** Manual, sem
+Playwright/Puppeteer: você preenche `hasCta`/`hasVsl`/`affiliateParamsPreserved` no
+momento do cadastro, olhando a própria página. Decisão registrada na seção 10, item 6.
+Continua sendo o caminho rápido — nem todo produto precisa da análise rica abaixo.
 
-1. Checagem técnica/determinística: a página carrega rápido? Os parâmetros de afiliado
-   (subid, click id) sobrevivem até o checkout? Testável com automação de navegador
-   (Playwright/Puppeteer): abrir a LP com um parâmetro de teste na URL, seguir o funil até o
-   checkout, verificar se o parâmetro ainda está lá. Decisão em aberto (seção 10, item novo):
-   isso roda automaticamente e periodicamente (custo de infra: navegador headless), ou fica
-   manual/sob demanda por enquanto?
-2. Checagem qualitativa via IA (novo schema landingPageAudit, seção 7): presença de CTA claro,
-   presença de VSL, clareza da oferta. Precisa decidir se a IA analisa o HTML/texto da página
-   ou uma screenshot (visão) — screenshot é mais fiel pra "isso parece uma página de vendas de
-   qualidade?", HTML é mais barato e determinístico pra "existe um elemento de vídeo ou link de
-   VSL na página?". Recomendo começar por HTML/texto e evoluir pra screenshot se necessário.
+**Nível 2 — Auditor de LP avançado com IA (novo, 2026-08-04 — ver Fase 3d, seção 9).**
+Especificação completa trazida pelo usuário, formalizada aqui. Muda a pergunta central
+de "essa página tem CTA?" pra **"essa página está preparada pra transformar tráfego
+pago do Google Ads em conversão?"** — a IA atua como gestor sênior de Google Ads +
+CRO + copywriting + UX, não como um checklist raso.
 
-O resultado dos dois tipos vai pra mesma tabela landing_page_audits (seção 4), mas
-affiliate_params_preserved e load_time_ms vêm do check técnico, has_cta/has_vsl/
-offer_clarity_score vêm da IA — a coluna raw_findings (jsonb) guarda o detalhe de cada um.
+**Entrada** (nem todos os campos obrigatórios — quanto mais, mais completa a análise):
+URL da LP, nome e descrição do produto, país de destino, público-alvo, palavra-chave
+principal (+ secundárias, opcional), texto/headline/descrição/CTA do anúncio do Google
+Ads, URL do checkout (opcional).
+
+**Dimensões analisadas** (cada uma vira uma seção do relatório, não só um número solto):
+primeira impressão, proposta de valor, copywriting, oferta, CTA, caminho até o checkout,
+confiança/prova social, correspondência Keyword → Anúncio → Landing Page (a mais
+importante — mede se a promessa do anúncio é cumprida na página), UX mobile,
+performance/experiência (só quando o dado existir de verdade — regra explícita de
+**nunca inventar dado que não conseguiu verificar**, mesmo princípio que já seguimos em
+Economics), intenção de compra da página (educa / gera interesse / gera desejo /
+conduz à compra / solicita a compra).
+
+**Saída**: "Landing Page Conversion Score" (0–100, com faixas de classificação de
+crítica a excelente — nunca apresentado sem explicação do motivo), lista de problemas
+priorizados (alta/média/baixa, com impacto esperado baixo/médio/alto, cada um com
+problema → por que importa → recomendação), até 3 sugestões alternativas de headline
+quando a proposta de valor for fraca, e um relatório executivo estruturado (score,
+diagnóstico geral, pontos positivos, principais problemas, top 5 melhorias, análise
+detalhada por dimensão).
+
+**Regra de honestidade** (herdada diretamente da especificação original, e consistente
+com o resto do projeto): a IA nunca afirma que uma mudança vai aumentar conversão —
+usa linguagem de "potencial de melhoria"/"provável impacto", nunca inventa métrica, e
+diferencia claramente "análise heurística da IA" de "resultado real de campanha".
+
+⚠️ **Decisões técnicas em aberto** (seção 10, itens novos) antes de implementar:
+1. **Como a IA "vê" a página?** Fetch de HTML/texto é barato mas não avalia design,
+   contraste de botão, "primeira impressão" visual nem UX mobile de verdade — pra isso
+   precisaria de screenshot (desktop + mobile) e um modelo com visão. Decisão parecida
+   com a do Playwright que já tomamos: screenshot bem feito provavelmente exige captura
+   via navegador headless (mesmo trade-off de custo/infra da seção 10 item 6 anterior) ou
+   um serviço de screenshot de terceiros — checar oficialidade/ToS **antes** de escolher,
+   mesma disciplina de hoje com o ClickBank.
+2. **Orçamento de tokens.** Esse schema é bem mais rico que `productOpportunity` (que já
+   precisou subir de 800 pra 2048 tokens) — esperar precisar de limite ainda maior, e
+   passar explícito por chamada (não virar padrão global) — ver o incidente já registrado
+   na Fase 3b.
+3. Como isso se relaciona com o Nível 1: a auditoria rica **substitui** os campos manuais,
+   ou os dois convivem (rápido primeiro, rica sob demanda depois)? Recomendo os dois
+   convivendo — a Fase 3c (tela de cadastro) já prevê "cadastro em 2 etapas": o Nível 1
+   cabe na etapa rápida, o Nível 2 vira uma ação explícita ("Rodar auditoria completa")
+   pra quando o produto já passou em Economics e vale o investimento de tempo/custo.
+
+O resultado dos dois níveis continua indo pra `landing_page_audits` (seção 4) — o
+Nível 2 provavelmente precisa de colunas novas (score, relatório estruturado completo em
+`jsonb`) além das que já existem; definir o DDL exato quando entrar em implementação.
 
 ---
 
 ## 6. Fluxo de dados ponta a ponta
 
+**Atualizado em 2026-08-04**: o passo de sincronização automática (n8n → discovery.sync)
+foi removido — descoberta de produto é 100% manual, via `POST /api/products/manual`
+(ou `/manual/bulk`). O fluxo abaixo começa a partir do cadastro manual.
+
 ```
-n8n (agendado, ex: a cada 6h)
-   |
-   v
-POST /internal/jobs/discovery/sync  -->  enfileira job em BullMQ (fila "discovery")
+Você cadastra um produto manualmente
+POST /api/products/manual  -->  grava em products + product_snapshots
                                               |
                                               v
-                                    worker: discovery.service.js
-                                    consulta APIs das redes de afiliados
-                                    grava em products + product_snapshots
-                                              |
-                                              v
-                                    enfileira 1 job por produto novo/atualizado
-                                    na fila "market-intel"
-                                              |
-                                              v
-                          worker: market-intel — PRIMEIRO passo: economics.js (5.1)
-                          calcula CPC máximo, checa trava de comissão mínima.
-                          Se já reprovar aqui (comissão baixa), PARA — não gasta
-                          cota de Keyword Planner nem de IA com produto descartado.
+                                    já roda economics.js (5.1) na hora
+                                    calcula CPC máximo, checa trava de comissão mínima.
+                                    Se reprovar aqui (comissão baixa), já marca
+                                    rejeitado_por_comissao_minima — não precisa de
+                                    mais nenhum passo pra saber que não compensa.
                                               |
                                               v
                           se passou: enfileira job na fila "google-ads-keyword-research" (5.2)
@@ -333,9 +380,10 @@ diferentes por provider? Isso muda a implementação da camada.
 
 ## 8. Segurança e credenciais
 
-Isso aqui merece atenção redobrada porque a plataforma vai guardar chaves de API de:
-Digistore24, ClickBank, CJ, Impact, Awin, PartnerStack, Google Ads, Anthropic, OpenAI — oito
-integrações externas com poder de gastar dinheiro ou expor dados de conta.
+Isso aqui merece atenção redobrada porque a plataforma guarda chaves de API de:
+Google Ads, Anthropic, OpenAI (e futuramente um provedor de inteligência competitiva,
+Fase 4) — poder de gastar dinheiro ou expor dados de conta. (Credenciais de rede de
+afiliados não são mais necessárias — descoberta automática saiu do escopo, ver Fase 2.)
 
 - Nenhuma credencial em texto puro no banco. Mesmo sendo uso privado/pessoal, usar ao menos
   criptografia simétrica em repouso (ex: pgcrypto no Postgres, ou node:crypto com uma chave
@@ -417,41 +465,29 @@ customer_id 7169854441).
 
 ---
 
-### Fase 2 — Discovery (1 rede) + Economics (5.1)
-**Status: 🟡 código completo, ⏳ pendente de teste com credencial real.**
-Rede escolhida: **Digistore24**.
+### Fase 2 — Discovery (cadastro manual) + Economics (5.1)
+**Status: ✅ concluída e testada com dado real (2026-08-04, atualizado).**
+Cadastro **manual, definitivo** — não é mais fallback temporário.
 
-- Objetivo: primeiro produto real entrando no sistema, e o cálculo de viabilidade financeira funcionando isoladamente.
-- Pré-requisito: `DIGISTORE24_API_KEY` no `.env` (Digistore24 → configurações de conta → chave de API, permissão `readonly` já basta) + limiar de comissão mínima — usando **R$ 20** como padrão até você definir outro valor.
-- Escopo: connector Digistore24 (`discovery/connectors/digistore24.js`), `economics.js` completo (`market-intel`), `syncNetwork()` já roda Economics automaticamente pra cada produto sincronizado.
-- ⚠️ **Bloqueio CONFIRMADO (2026-08-04)**: `listMarketplaceEntries` foi checada
-  contra a descrição oficial no Swagger — *"Lists all marketplace data of the
-  vendor including statistical numbers"*. Ou seja: essa função lista as entradas
-  de marketplace que **você publicou como vendedor**, não o catálogo público que
-  um afiliado navega. **Não existe função de API documentada para "buscar o
-  marketplace geral como afiliado"** no Digistore24 — isso parece ser uma
-  funcionalidade só de UI. Confirmado com conta real: `count: 0` fazia sentido
-  o tempo todo (a conta não publica produtos próprios).
-  **Decisão**: descoberta automática de produtos via API não é viável para o
-  Digistore24 no momento. `POST /api/products/manual` (e sua versão em lote,
-  `POST /api/products/manual/bulk`) é o caminho oficial pra alimentar o Discovery
-  com produtos dessa rede — você copia os dados da UI, o pipeline de Economics
-  roda igual. **Vale abrir chamado com o suporte do Digistore24** perguntando se
-  existe uma forma de automatizar isso (ex: feed RSS/CSV de ofertas, ou uma
-  função de API não documentada) antes de assumir que é impossível de vez — mas
-  isso não bloqueia mais o progresso.
-  **Lição para a Fase 5**: nem toda rede de afiliados expõe "navegar o
-  marketplace" via API — checar isso é o primeiro passo antes de investir tempo
-  em qualquer connector novo, não o último.
+- Objetivo: produtos reais entrando no sistema, e o cálculo de viabilidade financeira funcionando.
+- Pré-requisito: nenhuma credencial de rede de afiliados — limiar de comissão mínima definido (padrão **R$ 20**, ajustável).
+- Escopo: `economics.js` completo (`market-intel`), `addManualProduct`/`addManualProductsBulk` (`discovery`).
+- ⚠️ **Decisão formalizada em 2026-08-04**: descoberta automática de produtos via API
+  foi **removida do escopo do projeto** (decisão do usuário, não só "adiada"). Motivo:
+  confirmado com a Digistore24 que `listMarketplaceEntries` lista só produtos do
+  **próprio vendedor**, não o marketplace geral que um afiliado navega — não existe
+  função de API pra isso. Confirmado também que a ClickBank proíbe scraping
+  explicitamente nos Termos de Uso, mesmo via terceiro (ver decisão de não usar o
+  scraper do Apify). O connector Digistore24 e a rota de sync automático foram
+  **removidos do código** (não ficam como código morto). Cadastro manual/em lote é o
+  único caminho de Discovery, ponto final — ver Fase 5 pra como isso afeta expansão.
 - Checklist de teste:
-  - [ ] Connector autentica na rede escolhida e retorna ao menos 1 produto real (conferir manualmente que os dados fazem sentido: nome, comissão, preço batem com o que aparece no painel da rede)
-  - [ ] `upsertProducts` grava produto + snapshot sem duplicar quando roda de novo (mesmo `external_id` = update, não insert novo)
+  - [x] `upsertProducts` grava produto + snapshot sem duplicar quando roda de novo (mesmo `external_id` = update, não insert novo) — confirmado com os 3 produtos reais já cadastrados
   - [x] Testes unitários de `economics.js` — 10/10 passando: CPC de equilíbrio, aplicação de margem, trava de comissão mínima (ativando E desativando), caso de borda `taxaConversaoEsperada = 0` (marca `dado_insuficiente`, não lança erro nem aprova/rejeita), rejeição por leilão caro, validação de entrada
-  - [ ] Endpoint de listagem (`GET /api/products`) retorna produtos já com o `economics_status` certo (`viavel` / `rejeitado_por_comissao_minima`)
-- Definição de pronto: 1 produto real passou pelo pipeline completo de Discovery + Economics e o status faz sentido pra alguém que conhece esse produto (você).
+  - [x] Endpoint de listagem (`GET /api/products`) retorna produtos já com o `economics_status` certo — confirmado com os 3 produtos reais
+- Definição de pronto: ✅ atingida — 3 produtos reais passaram pelo pipeline completo.
 - **Endpoints disponíveis**:
-  - `POST /api/products/sync/digistore24` (admin) — ⚠️ sempre retorna `synced: 0` (bloqueio confirmado acima, não é mais esperado corrigir isso via código)
-  - `POST /api/products/manual` (admin) — cadastro manual de 1 produto, caminho principal por agora
+  - `POST /api/products/manual` (admin) — cadastro manual de 1 produto
   - `POST /api/products/manual/bulk` (admin) — cadastro em lote, body `{ products: [...], minCommission? }`
   - `GET /api/products` (admin) — lista com `economics_status` incluído
   - `POST /api/market-intel/economics/evaluate` (admin) — testa a fórmula isoladamente, sem produto real
@@ -501,7 +537,7 @@ do cadastro, olhando a página. Não existe checagem por IA/visão pra LP nesta 
 ### Fase 3b — Market Intelligence + AI Advisor (perguntas do Módulo 4)
 **Status: ✅ concluída e testada com dado real (2026-08-04).**
 - Objetivo: a IA respondendo, com contexto completo, as 8 perguntas do documento original.
-- Pré-requisito: ~~Fases 2 e 2b concluídas~~ ✅ + Claude/OpenAI (seção 10, item 2) — **aplicado o default**: só Claude por ora (`DEFAULT_AI_PROVIDER=claude`), decisão nunca formalmente respondida mas o sistema já opera assim desde o início; considerar resolvido na prática.
+- Pré-requisito: ~~Fases 2 e 2b concluídas~~ ✅ + ~~Claude/OpenAI~~ ✅ **RESOLVIDO em 2026-08-05**: só Claude, definitivamente.
 - Escopo: `scoring.js` (sub-scores determinísticos, testado — 6/6), `market-intel/service.js#scoreProduct()` (orquestra score + chama IA), `ai-advisor/service.js#evaluateProductOpportunity()` (as 8 perguntas, schema `productOpportunity`).
 - Detalhe de implementação: chamada de IA é **pulada** quando `economics.status === 'rejeitado_por_comissao_minima'` (rejeição trivial, não precisa de julgamento) — mas **continua rodando** pra `rejeitado_por_economics` (caso de borda real, vale testar se a IA recomenda `false` corretamente, ou identifica uma keyword alternativa mais barata).
 - ⚠️ **Incidente corrigido no mesmo dia — limite de tokens**: a primeira chamada real truncou o JSON (schema `productOpportunity` é maior que os outros — 2 arrays + reasoning de até 200 palavras — e o limite padrão de 800 tokens não coube). Corrigido com limite **configurável por chamada** (`shared/ai-provider/index.js` agora aceita `maxTokens` e repassa pro provider), `evaluateProductOpportunity()` pede 2048 especificamente, os outros (veredito de campanha, compliance) continuam em 800 — evita pagar o custo de um limite alto em TODAS as chamadas só porque uma precisa.
@@ -517,37 +553,245 @@ do cadastro, olhando a página. Não existe checagem por IA/visão pra LP nesta 
 
 ---
 
-### Fase 4 — Competitive Intelligence
-- Objetivo: visibilidade sobre o que concorrentes estão anunciando pros produtos já qualificados.
-- Pré-requisito: fonte de dado decidida (seção 10, item 1).
-- Escopo: integração com o provider escolhido, `competitive-intel`.
+### Fase 3c — Tela de cadastro de produtos (frontend)
+**Status: ✅ concluída e testada com dado real (2026-08-05).**
+- Objetivo: destravar o uso contínuo do sistema. Hoje o cadastro (`POST /api/products/manual` e `/manual/bulk`) só é acionado via chamada HTTP direta (curl/Postman) — inviável pra virar hábito semanal de verdade.
+- Pré-requisito: nenhum técnico — a API já existe e está testada (Fases 2 e 3). É 100% trabalho de frontend.
+- Escopo: `apps/web/src/features/discovery/{ProductsPage,QuickAddModal,LpAuditModal}.jsx`, estilos novos em `styles.css` (cards, modal, preview de economics).
+- Diretrizes de UX aplicadas (todas as 6 da sessão anterior):
+  1. ✅ Formulário curto — nome, rede, comissão, preço, conversão em destaque; URL da página e comissão mínima em seção "opções avançadas" recolhível.
+  2. ✅ Preview de Economics ao vivo — chama `/market-intel/economics/evaluate` com debounce de 400ms a cada mudança em comissão/conversão, mostra CPC máximo e status colorido antes de salvar.
+  3. ✅ Cadastro em 2 etapas — `QuickAddModal` (Etapa 1: dados essenciais, dispara Economics + Compliance automaticamente) e `LpAuditModal` (Etapa 2: CTA/VSL/parâmetro preservado, aberta a qualquer momento depois, reenvia os dados via upsert com `skipCompliance: true` pra não gastar chamada de IA repetida).
+  4. ✅ `externalId` sugerido automaticamente via slug do nome, editável.
+  5. ✅ Lista em cards com badges de status (economics colorido, sensibilidade de nicho, indicador "Auditoria de LP pendente" quando `lp_audited_at` é null).
+  6. ✅ Botão "+ Adicionar produto" sempre visível no topo da tela.
+- Backend também estendido: `discovery/repository.js#listProducts` agora traz `niche_sensitivity`, `requires_presell`, `has_cta`, `has_vsl`, `affiliate_params_preserved`, `network_type` junto com cada produto (antes só trazia `economics_status`) — necessário pra tela mostrar tudo isso sem chamada extra por produto.
+- **Extra adicionado em 2026-08-05** (não estava no escopo original da Fase 3c, mas complementa direto): `BulkAddModal.jsx` — cadastro em lote pela UI, formato de mini-planilha (várias linhas, `+ Adicionar linha`), usa o `POST /manual/bulk` que já existia só via API. Sem preview de Economics por linha (ficaria pesado com várias linhas ao mesmo tempo) — o resultado (viável/rejeitado por produto) aparece no resumo depois de salvar.
 - Checklist de teste:
-  - [ ] Integração retorna ao menos 1 anúncio de concorrente real pra 1 produto já qualificado
-  - [ ] Rodar a coleta 2x com um intervalo (ex: 1 semana) e confirmar que uma mudança real gera um novo snapshot, não sobrescreve o anterior
-- Definição de pronto: você consegue ver, pelo dashboard, o que pelo menos 1 concorrente está fazendo pra 1 produto seu.
+  - [x] `npm install`/`npm run dev` no `apps/web` — rodou; 1 bug de robustez corrigido pelo Cursor: `loadProducts()` não tinha `try/catch/finally`, deixando a tela presa em "Carregando..." se a API falhasse — corrigido, aplicado também no sandbox de referência
+  - [x] Cadastrado produto real ("Advanced Amino Formula UI Test") pela Etapa 1 — preview de Economics apareceu **antes de salvar**: `CPC máx. EUR 2.94 / Viável`, batendo com o cálculo do backend
+  - [x] Card apareceu na lista com badge "Auditoria de LP pendente"
+  - [x] Etapa 2 (CTA/VSL/parâmetro + URL) preenchida e salva com sucesso
+  - [x] Badge de pendente sumiu depois de salvar, botão virou "Editar auditoria"
+  - [x] **Cadastro em lote testado com dado real (2026-08-05)**: 3 produtos reais (CircO2, Mitochondrial, Amino) cadastrados de uma vez pelo `BulkAddModal`, resumo mostrou `Viável` pros 3, cards apareceram na grade depois de atualizar — zero correções necessárias, JSX carregou de primeira no Vite.
+- Definição de pronto: ✅ atingida por completo — cadastro individual, em lote, e auditoria de LP, todos testados com dado real pela UI.
+
+---
+### Fase 3d — Auditor de LP avançado com IA (upgrade do 5.4 Nível 2)
+**Status: ✅ COMPLETA — Camada A e Camada B implementadas, testadas e validadas com
+dado real (2026-08-05). As duas camadas foram confirmadas contra inspeção manual real
+da página pelo usuário, não só "rodou sem erro".**
+- Objetivo: substituir o julgamento raso do Nível 1 (3 checkboxes manuais) por uma
+  análise rica de CRO/UX/copywriting/correspondência Google Ads → LP, gerando um
+  "Landing Page Conversion Score" (0–100) com relatório executivo priorizado — não só
+  um número, um diagnóstico acionável.
+- Escopo da Camada A (texto + performance real, sem visão):
+  - `shared/pagespeed.js` — PageSpeed Insights API (oficial, gratuita, confirmada
+    ativa), dado real de performance (Core Web Vitals), nunca estimado pela IA.
+  - `discovery/lpTextFetch.js` — busca e extrai texto da página (regex simples com
+    marcadores de estrutura H1/H2/H3/botão/lista — simplificação consciente, sem
+    parser de HTML completo; suficiente pra Camada A, revisitar se a qualidade da
+    análise não for boa o bastante).
+  - `ai-advisor/service.js#analyzeLandingPageText()` — monta o contexto (produto,
+    público-alvo, keyword, anúncio do Google Ads quando fornecido, performance real,
+    texto da página) e chama a IA com o schema `landingPageAuditReport`.
+  - `discovery/lpAudit.js#runAdvancedAuditTextOnly()` — orquestra tudo, grava em
+    `landing_page_audits` com `analysis_tier = 'camada_a'` (migration 013 — reaproveita
+    a tabela do Nível 1, não cria uma nova).
+  - Schema cobre: score + classificação, diagnóstico geral, pontos positivos,
+    problemas priorizados (com por-que-importa/recomendação/prioridade/impacto),
+    top 5 melhorias, correspondência Keyword→Anúncio→LP (quando há dado de anúncio),
+    força da proposta de valor (+ sugestões de headline se fraca), força da oferta,
+    avaliação de CTA, confiança/prova social + objeções não respondidas, intenção da
+    página, e **`limitacoes_da_analise`** (sempre preenchido — o prompt exige que a
+    IA declare que design visual/mobile/checkout não foram avaliados nesta camada).
+  - `max_tokens: 4096` — schema mais rico que `productOpportunity`, aplicado o mesmo
+    padrão de configurar por chamada (não virou default global) desde o incidente da
+    Fase 3b.
+- Fora de escopo nesta camada (fica pra Camada B): primeira impressão visual, UX
+  mobile real, contraste/posicionamento visual do CTA, análise de checkout por
+  interação — tudo que exige "ver" a página, não só ler o texto.
+- Checklist de teste:
+  - [x] `POST /api/products/:productId/lp-audit/advanced` rodou (Advanced Amino Formula) — HTTP 200, score `58 / precisa_melhorias`, gravado em `landing_page_audits` (`analysis_tier: camada_a`)
+  - [x] **Bug real encontrado e corrigido (2026-08-05)**: `sales_page_url` (e `category`, `countries_allowed`) nunca eram atualizados numa segunda gravação do mesmo produto — o `ON CONFLICT` do `upsertProducts` só tocava `name`/`price`/`commission_value`/`epc`/`conversion_rate`/`currency`. Isso quebrava silenciosamente o fluxo de "cadastro rápido sem URL → completar depois" (Etapa 2 da Fase 3c) — se a URL não fosse dada na Etapa 1, nunca dava pra setar depois. Corrigido: `sales_page_url` agora usa `COALESCE(EXCLUDED.sales_page_url, products.sales_page_url)` (atualiza se veio valor novo, preserva o antigo se não veio — não apaga por engano no cadastro em lote, que não pede URL).
+  - [x] `limitacoes_da_analise` veio preenchido corretamente: análise visual/mobile ausente, PageSpeed indisponível, checkout não avaliado, e a IA ainda declarou por conta própria "texto extraído com ruído de formatação" — sinal de que o extrator simples (regex) tem limitação real, considerar melhorar se isso prejudicar a qualidade da análise no futuro.
+  - [x] `correspondencia_google_ads` veio preenchido e classificou `critica` — **mas por dado de teste ruim meu**, não falha do sistema: usei o texto promocional de recrutamento de afiliado da Digistore24 ("Earn 60% Commission...") como se fosse o headline do anúncio real do Google Ads, o que está errado — esse texto é pro afiliado, não pro consumidor final. A IA identificou a incoerência corretamente dado o que recebeu. Refazer o teste com copy de anúncio realista antes de validar essa parte de verdade.
+  - [~] PageSpeed retornou `null` — **não é bug**: cota diária da API excedida (`Quota exceeded... Queries per day`), capturado com `try/catch`, logou aviso, não quebrou a auditoria. Comportamento de degradação graciosa funcionando como desenhado. Configurar `GOOGLE_PAGESPEED_API_KEY` (chave própria, gerada no Google Cloud Console) deve resolver — cota anônima é baixa.
+  - [x] Reasoning específico, citando o problema real (incoerência headline × produto) — não genérico
+  - **Ajustes de robustez feitos pelo Cursor + eu**: 1ª tentativa da IA não bateu com o schema (inventou chaves) — `maxTokens` subiu de 4096 pra 8192, e a extração de JSON (`shared/ai-provider/index.js#cleanJsonText`) ficou mais tolerante (extrai o miolo entre a primeira `{` e a última `}`, não exige mais que a resposta já venha 100% limpa). `diagnostico_geral.maxLength` subiu de 600 pra 1200 — 600 rejeitava diagnósticos válidos em português (naturalmente mais verboso que inglês pra dizer a mesma coisa). Tudo aplicado no código-fonte, não só no ambiente do Cursor.
+  - [x] **Reteste com dado de anúncio realista (2026-08-05) — comparação direta que prova que o sistema está lendo a página de verdade**:
+
+    | | Anúncio ruim (texto de afiliado) | Anúncio realista |
+    |---|---|---|
+    | `correspondencia_google_ads` | `critica` | `boa` |
+    | `score` | 58 / precisa_melhorias | 76 / boa |
+
+    A explicação do segundo teste citou o **H3 exato da página** ("This combination of 8 essential amino acids...") pra justificar a nota — não é resposta genérica, é leitura real do texto extraído. Ainda achou 1 problema específico e válido: o H1 da página é um depoimento de cliente, não reforça a promessa do anúncio imediatamente — esse é o tipo de achado acionável que a Fase 3d existe pra dar.
+
+**Camada B (visão) — implementada em 2026-08-05:**
+- Fonte de screenshot decidida (seção 10, item 7): **ScreenshotOne**, pesquisada
+  contra 8 outras opções — 100 capturas grátis/mês sem cartão, não cobra por
+  captura que falha, mais recomendada nas comparações de 2026.
+- Escopo: `shared/screenshot.js` (captura desktop 1280x900 + mobile 390x844, com
+  bloqueio de anúncio/cookie banner/tracker embutido no próprio serviço), suporte a
+  imagem adicionado em `claudeProvider.js`/`ai-provider/index.js` (antes só aceitava
+  texto), schema novo `landingPageVisualAudit` (primeira impressão, hierarquia
+  visual, UX mobile, problemas visuais — deliberadamente **não repete** análise de
+  copy, que já é coberta pela Camada A), `ai-advisor/service.js#analyzeLandingPageVisual()`,
+  `discovery/lpAudit.js#runAdvancedAuditVisual()`.
+- Grava na mesma tabela `landing_page_audits`, `analysis_tier = 'camada_b'` — **não
+  substitui** o registro da Camada A, os dois convivem lado a lado (decisão já
+  registrada no item 8 da seção 10, aplicada aqui de propósito).
+- `score_visual_parcial` é deliberadamente separado do `landing_page_conversion_score`
+  da Camada A — ainda não existe lógica de combinar os dois num score único; unir os
+  dois com peso definido é decisão de produto pra revisitar depois de ver alguns
+  resultados reais, não inventar um peso arbitrário agora.
+- Checklist de teste (pendente — precisa de conta ScreenshotOne configurada):
+  - [x] Conta ScreenshotOne criada, `SCREENSHOTONE_ACCESS_KEY` configurada
+  - [x] `POST /api/products/:productId/lp-audit/visual` rodado no Advanced Amino Formula — HTTP 200, `score_visual_parcial: 76`, persistido (`analysis_tier: camada_b`, id=5)
+  - [x] **Validação cruzada real (2026-08-05)**: usuário abriu a LP no navegador e confirmou ponto a ponto — hero navy + CTA laranja, frasco, selo Money Back, quote da Jacqui, tudo batendo com `clareza_produto: clara`, `cta_visivel_acima_da_dobra: true`, `contraste_cta: bom`. Achados específicos não genéricos: gráfico "Protein Utilization Chart" ilegível no mobile, selo de garantia sobrepondo o produto no hero desktop, menu hambúrguer pouco visível — só aparecem analisando a imagem de verdade.
+  - [x] `limitacoes_da_analise` funcionou como desenhado: a IA declarou honestamente que parte da página ficou cortada na captura (limite `full_page_max_height` ou timeout) em vez de inventar avaliação da parte que não viu.
+- **Ponto de atenção pra próxima vez**: a captura cortou o fim da página (depoimentos completos, seção do especialista, garantia). Se isso prejudicar auditorias futuras em páginas muito longas, considerar subir `full_page_max_height` ou capturar em múltiplas seções — não é bloqueante agora, só registrar como limitação conhecida.
+- Definição de pronto: ✅ atingida por completo — Camada A (texto) e Camada B
+  (visual) implementadas, testadas e validadas contra a página real.
+- **Nota de valor**: o usuário classificou isso como potencialmente uma das
+  features principais da plataforma — priorizar na próxima sessão de implementação,
+  não deixar esquecido no fim da lista.
 
 ---
 
-### Fase 5 — Expansão
-- Objetivo: multiplicar Discovery pras demais redes, com o pipeline já provado.
-- Pré-requisito: Fases 2 a 4 rodando de forma estável há um tempo (você define quanto).
-- Escopo: repetir o connector de Discovery pras redes restantes.
+### Fase 4 — Competitive Intelligence
+**Status: ✅ COMPLETA e validada com dado real (2026-08-05).**
+
+- Objetivo: visibilidade sobre o que concorrentes estão anunciando pros produtos já qualificados.
+- Pré-requisito: ~~fonte de dado decidida~~ ✅ resolvido — Google Ads Transparency Center, cadastro manual (seção 10, item 1).
+- Escopo: `competitive-intel/{repository,service,routes}.js` (cadastro manual + detecção de mudança via snapshot), `apps/web/src/features/competitive-intel/{CompetitiveIntelPage,CompetitorAdModal}.jsx`.
+- Detalhe de implementação: `addManualCompetitorAd()` verifica se já existe um anúncio do mesmo concorrente com o mesmo headline + landing page — se sim, **não duplica**, só atualiza `last_seen_at` e grava um snapshot novo (histórico preservado). Anúncio pode opcionalmente ser vinculado a um produto seu específico (`productId`), mas isso é opcional — dá pra cadastrar concorrência geral sem vincular a nada.
 - Checklist de teste:
-  - [ ] Repetir a checklist da Fase 2 pra cada rede nova
-  - [ ] Comparar scores de produtos entre redes diferentes e confirmar que o modelo não está enviesado pra rede que tem mais dado histórico acumulado
-- Definição de pronto: pelo menos 2 redes rodando em paralelo sem comportamento inconsistente entre elas.
+  - [x] Cadastrado anúncio real (Vital Proteins/Nestlé USA, nicho suplementos) via Ads Transparency Center pela tela — apareceu na lista, `snapshot_count: 1`
+  - [x] Recadastrado o **mesmo** anúncio (mesmo concorrente + headline + LP) — **não duplicou**: continuou 1 linha, `snapshot_count` foi pra 2
+  - [x] Cadastrado anúncio **diferente** do mesmo concorrente (headline diferente: "Eco-Friendly Collagen Peptides") — virou registro novo e separado, `snapshot_count: 1`
+- Definição de pronto: ✅ atingida — deduplicação por concorrente+headline+LP confirmada com dado real, exatamente como desenhado.
+
+---
+
+### Fase 5 — Expansão pra mais redes de afiliados
+**Redefinida em 2026-08-04**: não existe mais "connector de rede" nenhum pra repetir
+— descoberta automática está fora do escopo (ver Fase 2). Expandir pra mais redes
+agora é só usar o cadastro manual que já existe, sem código novo.
+
+- Objetivo: ter produtos de mais de uma rede de afiliados no sistema, comparáveis entre si.
+- Pré-requisito: nenhum técnico — só você ter produtos de outra rede pra cadastrar.
+- Escopo: nenhum código novo. `POST /api/products/manual` já aceita qualquer
+  `networkType` (é só uma string, não precisa de connector cadastrado).
+- Checklist de teste:
+  - [ ] Cadastrar pelo menos 1 produto de uma segunda rede (ex: ClickBank, CJ, o que você tiver acesso)
+  - [ ] Comparar `opportunity_scores` entre produtos de redes diferentes e confirmar que o modelo não está enviesado pra rede com mais dado histórico acumulado
+- Definição de pronto: pelo menos 2 redes com produtos cadastrados, ambas passando pelo mesmo pipeline (Economics, Compliance, Auditoria de LP, score) sem tratamento especial.
+
+---
+
+### Fase 6 — Cadastro de Campanhas no Google Ads
+**Status: 📋 planejada (2026-08-05) — especificação inicial, decisões em aberto,
+sem código.**
+
+- Objetivo: fechar o loop que hoje para em "vale a pena anunciar?" (Fase 3b). A
+  campanha nasce já com os números que Economics (5.1) e Keyword Research (5.2)
+  calcularam — CPC máximo, orçamento inicial sugerido, palavras-chave reais com
+  volume/competição — em vez de você digitar tudo de novo manualmente no Google Ads.
+- **Princípio central (não negociável, ver seção 1)**: o sistema **nunca cria
+  campanha automaticamente**. Gera um **rascunho** (gravado no banco), você revisa
+  na tela, e só cria de verdade no Google Ads com confirmação explícita. Isso é
+  a primeira vez que o sistema executaria uma ação real com dinheiro real — o
+  padrão de "recomendação, nunca execução automática" que seguimos o projeto
+  inteiro fica ainda mais crítico aqui.
+- Escopo previsto:
+  - Tabela nova `campaign_drafts` (product_id, nome, orçamento diário proposto,
+    moeda, palavras-chave propostas — reaproveitando `keyword_metrics` já
+    coletado na Fase 2b —, sugestões de headline/descrição, `final_url`, status:
+    `draft` → `approved` → `created_in_google_ads` → `failed`, `google_campaign_id`
+    preenchido só depois da criação real).
+  - Sugestão de copy do anúncio via IA, **checando correspondência com a Landing
+    Page** — reaproveita a mesma lógica já validada no Auditor de LP (Fase 3d,
+    seção 5.4) pra não nascer um anúncio que promete o que a página não entrega.
+  - Criação real via API do Google Ads: sequência encadeada (orçamento → campanha
+    → grupo de anúncios → palavras-chave → anúncio), cada chamada dependendo do
+    ID da anterior — mais complexo que qualquer coisa que já fizemos (leitura é
+    simples, escrita tem bem mais regra de negócio própria do Google Ads).
+- Decisões em aberto antes de implementar (ver seção 10, itens novos):
+  9. Orçamento diário/mensal máximo — trava dura que nunca pode ser ultrapassada,
+     mesmo que a Economics sugira mais?
+  10. Copy do anúncio: IA sugere (com revisão sua) ou você escreve e o sistema só
+      cuida da estrutura (orçamento/palavras-chave)?
+- Checklist de teste: (definir quando as decisões acima forem resolvidas)
+- Definição de pronto: criar 1 campanha real, pequena, a partir de um rascunho
+  revisado por você, e ela aparecer certinha no Google Ads (mesmos dados do
+  rascunho, sem surpresa).
+
+---
+
+### Fase 7 — Gestor de Contingência
+**Status: 📋 planejada (2026-08-05) — especificação inicial, decisões em aberto,
+sem código.**
+
+Duas partes de natureza bem diferente — importante não misturar expectativa.
+
+**Parte A — Revisão preventiva de anúncio (viável de verdade).**
+- Objetivo: revisar o texto exato do anúncio contra políticas reais do Google Ads
+  (alegação sem comprovação, superlativo problemático, uso indevido de marca) antes
+  de publicar — não depois de tomar reprovação. Estende o Compliance (5.3), que
+  hoje classifica só o nicho do produto, não o texto específico do anúncio.
+- Também fecha uma lacuna real: a tabela `alerts` já previa o tipo `ad_disapproved`
+  desde o desenho original (migration 004), mas isso **nunca foi implementado** —
+  só `campaign_paused` e `impression_drop` existem de verdade hoje. O Google Ads
+  expõe via API o status de aprovação de cada anúncio e o motivo da reprovação —
+  é extensão natural do `monitoring` que já roda.
+- Escopo previsto: novo schema de IA (`adPolicyReview` ou similar) reaproveitando
+  o padrão `ai-advisor`; extensão do `monitoring/service.js` pra consultar status
+  de aprovação de anúncio via GAQL e gerar alerta `ad_disapproved` de verdade.
+
+**Parte B — Diagnóstico e apelação (limite real, não é "resgate automático").**
+- ⚠️ **Não existe automação possível pra desbloquear conta.** Suspensão de conta
+  no Google Ads só se resolve pelo processo de apelação do próprio Google (recurso
+  formal, revisão humana do lado deles) — não existe endpoint de API pra isso.
+  Nenhuma automação (nossa ou de terceiro) pula essa etapa. Registrar isso aqui
+  pra não a expectativa errada voltar numa conversa futura.
+- O que dá pra construir de verdade:
+  1. Detecção rápida de mudança de status da **conta** (não só campanha) via
+     monitoring.
+  2. Diagnóstico assistido por IA: juntar histórico de compliance + anúncios
+     reprovados recentes, gerar hipótese de causa provável.
+  3. Rascunho de texto de apelação — a IA prepara, você revisa e envia manualmente
+     pelo formulário oficial do Google.
+- Decisão em aberto antes de implementar (ver seção 10, item novo):
+  11. Você já tem mais de uma conta de anúncio hoje, ou é uma única conta por
+      enquanto? O sistema inteiro hoje está fixado numa conta só via `.env`
+      (`GOOGLE_ADS_CUSTOMER_ID`) — múltiplas contas mudaria bastante o desenho
+      do banco (a tabela `google_ads_accounts` já existe desde o início, mas
+      nunca foi usada pra mais de 1 conta de verdade).
+- Checklist de teste: (definir quando as decisões acima forem resolvidas)
+- Definição de pronto: Parte A rodando num anúncio real antes de publicar; Parte B
+  gerando um diagnóstico + rascunho de apelação úteis o suficiente pra você usar
+  de verdade, sem prometer resultado da apelação em si (isso depende do Google).
 
 ---
 
 ## 10. Decisões que preciso da sua confirmação
 
-1. Fonte de dado do Módulo 3 (Inteligência Competitiva). Ferramenta de terceiros com API
-   própria (SpyFu, SEMrush, Adbeat, BigSpy) vs. scraping direto (frágil, risco de ToS).
-   Recomendo a primeira opção. Qual caminho?
-2. Claude vs OpenAI (seção 7). Redundância entre os dois, ou tarefas diferentes por provider?
-3. Single-user ou multi-user? Decide se vale a pena já sair com autenticação de usuário
-   completa ou se a ADMIN_KEY simples ainda serve.
-4. Hospedagem. Local (sua máquina/servidor doméstico) ou VPS/cloud?
+1. ~~Fonte de dado do Módulo 3 (Inteligência Competitiva).~~ **RESOLVIDO em
+   2026-08-05**: cadastro manual, a partir do **Google Ads Transparency Center**
+   (`adstransparency.google.com`) — ferramenta oficial e gratuita do Google, mas
+   **sem API pública** (confirmado por pesquisa, nenhuma fonte de 2026 lista uma
+   API oficial). Descartada a ideia original de ferramenta paga terceira
+   (SpyFu/SEMrush/Adbeat/BigSpy) — não é necessária, mesmo padrão de cadastro
+   manual que já validamos pra produtos (Fase 2) resolve isso sem custo e sem
+   risco de ToS.
+2. ~~Claude vs OpenAI (seção 7).~~ **RESOLVIDO em 2026-08-05**: só Claude,
+   definitivamente — sem necessidade prática de adicionar OpenAI pro caso de uso atual.
+3. ~~Single-user ou multi-user?~~ **RESOLVIDO em 2026-08-05**: `ADMIN_KEY` simples
+   mantida — usuário único, autenticação completa não se justifica agora.
+4. ~~Hospedagem.~~ **RESOLVIDO em 2026-08-05**: local, por enquanto. Revisitar quando o
+   sistema estiver mais maduro/em uso constante.
 5. ~~(Novo) Nível de acesso do developer token do Google Ads.~~ **RESOLVIDO em 2026-08-04**:
    conta MagicZap já tem developer token com **Acesso Básico** (`H1JCPetQ3VRaB-Hs49nx0g`),
    confirmado suficiente pro Keyword Plan Idea Service (limite de 15 mil operações/dia, bem
@@ -556,6 +800,26 @@ do cadastro, olhando a página. Não existe checagem por IA/visão pra LP nesta 
    em 2026-08-04**: verificação manual (você preenche `affiliateParamsPreserved` ao
    cadastrar o produto, olhando a página) — sem Playwright/Puppeteer por ora. Reavaliar
    automação só se o volume de produtos justificar o investimento de infra.
+7. ~~(Novo, 2026-08-04) Captura de screenshot pro Auditor de LP avançado (Fase 3d).~~
+   **RESOLVIDO em 2026-08-05**: **ScreenshotOne** — pesquisado contra 8 outras opções
+   (CaptureKit, ApiFlash, Urlbox, ScreenshotAPI.net, Scrnify, entre outras). Motivo:
+   100 capturas grátis/mês sem cartão (cobre o volume esperado — poucos produtos por
+   semana), não cobra por captura que falha, e é a opção mais citada como confiável/
+   recomendada nas comparações de 2026. Urlbox é mais "enterprise" (sem tier grátis,
+   mais caro); CaptureKit é mais barato em volume alto, que não é o nosso caso.
+8. ~~(Novo, 2026-08-04) Nível 1 e Nível 2 da Auditoria de LP convivem, ou o Nível 2
+   substitui o Nível 1?~~ **RESOLVIDO em 2026-08-04** (aplicado na prática, Fase 3c):
+   convivem — Nível 1 no cadastro rápido, Nível 2 como ação separada sob demanda.
+9. **(Novo, 2026-08-05) Orçamento máximo — Fase 6.** Trava dura de orçamento
+   diário/mensal que o cadastro de campanha nunca pode ultrapassar, mesmo que a
+   Economics sugira mais? Se sim, qual valor?
+10. **(Novo, 2026-08-05) Copy do anúncio — Fase 6.** A IA sugere headline/descrição
+    (com sua revisão antes de publicar), ou você escreve e o sistema só cuida da
+    estrutura (orçamento/palavras-chave)?
+11. **(Novo, 2026-08-05) Single ou multi-conta de anúncio — Fase 7.** Você já tem
+    mais de uma conta do Google Ads hoje, ou é uma só por enquanto? Muda o desenho
+    do Gestor de Contingência (Parte B) e de como usamos a tabela
+    `google_ads_accounts`, que já existe mas nunca foi usada pra mais de 1 conta.
 
 Assim que você responder as pendentes, eu fecho os detalhes de implementação da próxima fase e a
 gente parte pro Cursor com escopo bem definido.

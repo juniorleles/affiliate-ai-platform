@@ -1,24 +1,66 @@
 // MÓDULO: competitive-intel (Módulo 3 do documento original)
-// Status: STUB — schema pronto (migration 007_competitive_intel.sql). Implementação
-// entra na Fase 4, e depende de uma decisão em aberto: fonte de dado (ferramenta de
-// terceiros com API própria, ex: SpyFu/SEMrush/Adbeat/BigSpy, vs. scraping direto —
-// ver docs/ARQUITETURA.md seção 9, item 1, antes de implementar qualquer coisa aqui).
+//
+// Fonte de dado decidida em 2026-08-05 (docs/ARQUITETURA.md seção 10, item 1):
+// cadastro MANUAL, a partir do Google Ads Transparency Center
+// (adstransparency.google.com) — ferramenta oficial e gratuita do Google, sem API
+// pública. Mesmo padrão que já usamos pra produtos (Fase 2): sem API oficial,
+// cadastro manual é o caminho, não scraping.
 
-const pool = require('../../shared/db/pool');
+const repo = require('./repository');
 
-async function scanCompetitorsForProduct(productId) {
-  throw new Error(
-    'Não implementado ainda. Ver docs/ARQUITETURA.md Fase 4 — decisão de fonte de ' +
-    'dado (seção 9) precisa ser confirmada antes de implementar este módulo.'
-  );
+/**
+ * Cadastra (ou atualiza) um anúncio de concorrente. Se já existir um anúncio do
+ * mesmo concorrente com o mesmo headline + landing page, NÃO cria um registro
+ * duplicado — atualiza last_seen_at e grava um snapshot novo, preservando o
+ * histórico (checklist da Fase 4 pede exatamente isso: mudança real gera
+ * snapshot novo, não sobrescreve o anterior).
+ */
+async function addManualCompetitorAd(input) {
+  const {
+    competitorName, competitorDomain, productId, platform,
+    headline, body, creativeUrl, landingPageUrl,
+  } = input;
+
+  if (!competitorName || !headline) {
+    throw new Error('competitorName e headline são obrigatórios.');
+  }
+
+  const competitor = await repo.findOrCreateCompetitor(competitorName, competitorDomain);
+
+  let ad = await repo.findMatchingAd(competitor.id, headline, landingPageUrl);
+  let isNewAd = false;
+
+  if (!ad) {
+    ad = await repo.insertCompetitorAd({
+      competitorId: competitor.id,
+      productId: productId || null,
+      platform: platform || 'google_ads',
+      headline, body, creativeUrl, landingPageUrl,
+    });
+    isNewAd = true;
+  } else {
+    ad = await repo.touchAdLastSeen(ad.id);
+  }
+
+  const snapshot = await repo.insertSnapshot(ad.id, {
+    headline, body, creativeUrl, landingPageUrl,
+    fonte: 'Google Ads Transparency Center (cadastro manual)',
+    registrado_em: new Date().toISOString(),
+  });
+
+  return { competitor, ad, snapshot, isNewAd };
 }
 
 async function listCompetitorAds(productId) {
-  const { rows } = await pool.query(
-    'SELECT * FROM competitor_ads WHERE product_id = $1 ORDER BY last_seen_at DESC',
-    [productId]
-  );
-  return rows;
+  return repo.listAdsForProduct(productId);
 }
 
-module.exports = { scanCompetitorsForProduct, listCompetitorAds };
+async function listAllCompetitorAds() {
+  return repo.listAllAds();
+}
+
+async function getAdHistory(adId) {
+  return repo.getSnapshotHistory(adId);
+}
+
+module.exports = { addManualCompetitorAd, listCompetitorAds, listAllCompetitorAds, getAdHistory };

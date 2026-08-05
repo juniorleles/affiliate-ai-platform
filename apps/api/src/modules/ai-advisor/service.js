@@ -265,10 +265,166 @@ async function evaluateProductOpportunity({ productId, product, economics, keywo
   return saved;
 }
 
+const LP_AUDIT_SYSTEM_PROMPT = `
+Você atua como um gestor sênior de Google Ads + especialista em CRO (Conversion Rate
+Optimization) + copywriter + especialista em UX. Sua tarefa é analisar uma landing page
+e responder: "essa página está preparada pra transformar tráfego pago do Google Ads em
+conversão?" — não é uma avaliação estética, é uma avaliação de conversão.
+
+Você recebe o TEXTO extraído da página (não uma imagem — não avalie design, cores,
+contraste de botão, layout visual, espaçamento nem experiência mobile visual; isso
+está fora do que você consegue avaliar com o dado fornecido). Se o texto sugerir
+ausência de algo (ex: nenhum depoimento visível no texto), trate como ausente, mas
+deixe claro na análise que é baseado no texto disponível, não em inspeção visual.
+
+Responda SOMENTE com um objeto JSON válido, sem markdown, sem texto fora do JSON,
+seguindo exatamente o schema fornecido.
+
+Regras:
+- "landing_page_conversion_score": 0-100. Faixas: 90-100 excelente, 80-89 muito boa,
+  70-79 boa (com oportunidades), 60-69 precisa de melhorias, 40-59 fraca, 0-39 crítica.
+  Este score reflete SÓ as dimensões avaliáveis por texto (copy, oferta, CTA, prova
+  social, correspondência com o anúncio) — não inclui design/visual/mobile, que exigem
+  análise de imagem (não disponível aqui). Sempre mencione essa limitação em
+  "limitacoes_da_analise".
+- "correspondencia_google_ads": null se não houver dados de anúncio/keyword no contexto.
+  Quando houver, compare Keyword → Anúncio → Landing Page e avalie se a promessa do
+  anúncio é cumprida na página.
+- "proposta_de_valor.sugestoes_headline": só preencha se "forca" for "fraca", "confusa"
+  ou "generica". Gere até 3 alternativas baseadas em Benefício + Público + Problema/
+  Solução + Diferencial, usando as informações reais fornecidas — nunca invente
+  característica, depoimento, número de clientes ou resultado que não foi fornecido.
+- "confianca_prova_social.objecoes_nao_respondidas": objeções de compra comuns que o
+  texto da página não trata.
+- "principais_problemas": priorize por impacto potencial na conversão, não por
+  quantidade. Cada item precisa de recomendação prática, não só "está ruim".
+- "limitacoes_da_analise": SEMPRE inclua ao menos a limitação de que design visual, UX
+  mobile real e caminho até o checkout (quando a URL de checkout não foi fornecida ou
+  não pôde ser lida) não foram avaliados nesta análise. Se algum outro dado não estava
+  disponível (ex: performance/PageSpeed ausente), declare isso também — nunca invente
+  dado que não recebeu.
+- "reasoning": no máximo 150 palavras, em português, direto, citando trechos/números
+  reais do contexto fornecido. Use linguagem de "potencial de melhoria"/"provável
+  impacto" — nunca afirme que uma mudança vai necessariamente aumentar conversão.
+`.trim();
+
+/**
+ * Auditor de LP avançado — Camada A (texto + performance real via PageSpeed,
+ * sem análise visual). Ver docs/ARQUITETURA.md seção 5.4, Fase 3d.
+ */
+async function analyzeLandingPageText({ productId, pageText, pageSpeed, product, adInfo, targetInfo }) {
+  const context = {
+    produto: { nome: product?.name, descricao: product?.description ?? null, categoria: product?.category ?? null },
+    publico_alvo: targetInfo?.publicoAlvo ?? null,
+    pais_destino: targetInfo?.pais ?? null,
+    palavra_chave_principal: targetInfo?.keywordPrincipal ?? null,
+    palavras_chave_secundarias: targetInfo?.keywordsSecundarias ?? null,
+    anuncio_google_ads: adInfo ? {
+      headline: adInfo.headline ?? null,
+      descricao: adInfo.description ?? null,
+      cta: adInfo.cta ?? null,
+    } : null,
+    performance_real_pagespeed: pageSpeed ? {
+      score: pageSpeed.performanceScore,
+      lcp_ms: pageSpeed.largestContentfulPaintMs,
+      cls: pageSpeed.cumulativeLayoutShift,
+      estrategia: pageSpeed.strategy,
+    } : null,
+    texto_da_pagina: pageText,
+  };
+
+  const { result, model, provider } = await aiProvider.analyze({
+    schema: 'landingPageAuditReport',
+    systemPrompt: LP_AUDIT_SYSTEM_PROMPT,
+    context,
+    maxTokens: 8192, // schema mais rico que productOpportunity; 4096 ainda truncava na 1ª tentativa (2026-08-05)
+  });
+
+  const saved = await repo.recordAnalysis({
+    subjectType: 'product',
+    subjectId: productId,
+    questionType: 'lp_audit_camada_a',
+    provider,
+    model,
+    verdict: result.score_classification,
+    confidence: result.landing_page_conversion_score >= 70 ? 'medium' : 'low', // score baixo com análise só de texto pede mais cautela
+    response: result,
+    reasoning: result.reasoning,
+  });
+
+  return { analysis: saved, result };
+}
+
+const LP_VISUAL_SYSTEM_PROMPT = `
+Você atua como especialista em UX e CRO analisando o SCREENSHOT de uma landing page
+(desktop e mobile). Diferente de uma análise de texto, aqui você está vendo a página
+de verdade — avalie primeira impressão visual, hierarquia, contraste do CTA, e UX
+mobile real. Não repita análise de copy/texto (isso já foi feito em outra camada) —
+foque só no que é possível avaliar VENDO a página.
+
+Responda SOMENTE com um objeto JSON válido, sem markdown, sem texto fora do JSON,
+seguindo exatamente o schema fornecido.
+
+Regras:
+- "score_visual_parcial": 0-100, reflete SÓ a dimensão visual (não é o score geral da LP).
+- "primeira_impressao": o que salta aos olhos nos primeiros segundos — clareza do que
+  está sendo vendido, profissionalismo do design, excesso de elementos que distraem.
+- "hierarquia_visual": o CTA principal está visível sem precisar rolar a página
+  (acima da dobra)? O contraste dele em relação ao fundo é bom o suficiente pra
+  chamar atenção?
+- "ux_mobile": baseado no screenshot mobile — legibilidade do texto, tamanho/
+  espaçamento dos botões, indício de scroll excessivo antes de chegar no CTA.
+- "problemas_visuais": só problemas que você consegue justificar pelo que vê nas
+  imagens — não invente problema que não dá pra confirmar visualmente.
+- "limitacoes_da_analise": declare qualquer coisa que não deu pra avaliar bem pela
+  imagem (ex: página cortada, elemento não carregou, screenshot com qualidade baixa).
+- "reasoning": no máximo 120 palavras, em português, citando o que você viu nas
+  imagens especificamente — nunca genérico.
+`.trim();
+
+/**
+ * Auditor de LP avançado — Camada B (visão, via screenshot desktop+mobile).
+ * Complementa a Camada A (texto) — não substitui, os dois relatórios convivem
+ * (ver docs/ARQUITETURA.md seção 10, item 8, decisão de 2026-08-04).
+ */
+async function analyzeLandingPageVisual({ productId, desktopBase64, mobileBase64, product }) {
+  const context = {
+    produto: { nome: product?.name, categoria: product?.category ?? null },
+    nota: 'A primeira imagem é o screenshot desktop, a segunda é o screenshot mobile.',
+  };
+
+  const { result, model, provider } = await aiProvider.analyze({
+    schema: 'landingPageVisualAudit',
+    systemPrompt: LP_VISUAL_SYSTEM_PROMPT,
+    context,
+    images: [
+      { base64: desktopBase64, mediaType: 'image/jpeg' },
+      { base64: mobileBase64, mediaType: 'image/jpeg' },
+    ],
+    maxTokens: 3000,
+  });
+
+  const saved = await repo.recordAnalysis({
+    subjectType: 'product',
+    subjectId: productId,
+    questionType: 'lp_audit_camada_b',
+    provider,
+    model,
+    verdict: result.score_visual_parcial >= 70 ? 'boa' : result.score_visual_parcial >= 40 ? 'precisa_melhorias' : 'fraca',
+    confidence: 'medium',
+    response: result,
+    reasoning: result.reasoning,
+  });
+
+  return { analysis: saved, result };
+}
+
 module.exports = {
   analyzeCampaignBudget,
   classifyProductCompliance,
   evaluateProductOpportunity,
+  analyzeLandingPageText,
+  analyzeLandingPageVisual,
   getHistory: repo.getHistory,
   getLatest: repo.getLatest,
   recordOutcome: repo.recordOutcome,

@@ -39,19 +39,22 @@ valida entrada e delega ao service).
 - Frontend: React + Vite, sem framework de UI (Tailwind, MUI etc.) sem confirmar antes.
   Tema visual definido em `apps/web/src/styles.css` — navy escuro (#0E1526), Space Grotesk
   (headers) + Inter (corpo) + JetBrains Mono (números). Manter esse padrão.
-- Módulos ainda não implementados (`discovery`, `market-intel`, `competitive-intel`) têm
-  stubs propositais que lançam erro claro apontando pra fase do roadmap — não "completar"
-  esses módulos silenciosamente sem antes checar `docs/ARQUITETURA.md` seção 8 e 9.
+- `discovery` e `market-intel` já estão implementados (cadastro manual + Economics +
+  score). Só `competitive-intel` continua stub, apontando erro claro pra Fase 4 — não
+  "completar" silenciosamente sem antes checar `docs/ARQUITETURA.md` seção 9.
 - Todo texto de interface e commit em português (pt-BR).
 
 ## Reorientação estratégica (2026-08-04) — leia antes de priorizar qualquer feature
 
 Descoberta automática de produtos (scraping/API de marketplace de rede de afiliados)
-**não é mais o foco central**. Confirmamos que a maioria das redes fecha isso via
+**está FORA DO ESCOPO do projeto** (decisão formal do usuário, 2026-08-04 — não é mais
+"despriorizado", é removido). Confirmamos que a maioria das redes fecha isso via
 aprovação manual (CJ, Impact, Awin) ou proíbe explicitamente em contrato (ClickBank —
-"You agree not to... scraping" nos Termos de Uso). Não implementar nenhum scraper de
-marketplace de rede de afiliados, mesmo via serviço terceiro, sem confirmar antes que
-ele usa API oficial sancionada (BYOC) — nunca automação de navegador driblando anti-bot.
+"You agree not to... scraping" nos Termos de Uso), e a Digistore24 nem expõe função de
+API pra isso. O connector Digistore24 e a rota de sync automático já foram removidos do
+código. **Não reintroduzir isso** (connector de rede, scraper, sync automático) sem o
+usuário pedir explicitamente de novo — cadastro manual (`POST /api/products/manual` e
+`/manual/bulk`) é o único caminho de Discovery, definitivo.
 
 O diferencial real da plataforma, a partir de agora, é:
 1. **Economics (5.1)** — trava de comissão mínima + CPC máximo calculado antes de gastar.
@@ -69,9 +72,10 @@ apareça pra alguma rede específica.
 
 ## O que evitar
 
-- Não implementar Módulo 3 (competitive-intel) de verdade sem a decisão de fonte de dado
-  confirmada (ver `docs/ARQUITETURA.md` seção 9, item 1) — scraping direto de landing
-  pages/anúncios de terceiros é frágil e pode violar termos de uso.
+- Módulo 3 (competitive-intel) é cadastro MANUAL, a partir do Google Ads Transparency
+  Center (`adstransparency.google.com`) — decisão fechada em 2026-08-05 (seção 10,
+  item 1). Nunca implementar scraper/automação pra isso — mesma regra do resto do
+  projeto: sem API oficial, é cadastro manual, não scraping.
 - Não deixar a IA executar ações automaticamente (pausar campanha, mudar orçamento no
   Google Ads). Ela sempre recomenda; a ação é manual ou confirmada explicitamente.
 - Não commitar `.env` nem dados de `infra/**/data`.
@@ -84,3 +88,9 @@ apareça pra alguma rede específica.
   `shared/fx.js`. Qualquer módulo novo que lide com dinheiro de fonte externa segue esse
   padrão: registra a moeda de origem, converte explicitamente antes de comparar — nunca
   assume que bate.)
+- Ao escrever `ON CONFLICT ... DO UPDATE SET`, sempre revisar se TODOS os campos que
+  fazem sentido atualizar estão na cláusula SET — não só os óbvios (nome, preço). (Bug
+  real em 2026-08-05: `upsertProducts` esquecia `sales_page_url`, `category` e
+  `countries_allowed`, quebrando silenciosamente o fluxo "cadastro rápido → completar
+  depois" da Fase 3c. Usar `COALESCE(EXCLUDED.campo, tabela.campo)` pra campos que um
+  caller pode legitimamente não enviar — evita apagar dado por omissão.)

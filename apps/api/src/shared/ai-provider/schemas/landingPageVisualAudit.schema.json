@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "landingPageVisualAudit",
+  "type": "object",
+  "required": [
+    "score_visual_parcial",
+    "primeira_impressao",
+    "hierarquia_visual",
+    "ux_mobile",
+    "problemas_visuais",
+    "limitacoes_da_analise",
+    "reasoning"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "score_visual_parcial": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Score só da dimensão visual/UX — não substitui nem se soma automaticamente ao score textual da Camada A."
+    },
+    "primeira_impressao": {
+      "type": "object",
+      "required": ["clareza_produto", "profissionalismo", "excesso_elementos", "resumo"],
+      "additionalProperties": false,
+      "properties": {
+        "clareza_produto": { "type": "string", "enum": ["clara", "confusa"] },
+        "profissionalismo": { "type": "string", "enum": ["alto", "medio", "baixo"] },
+        "excesso_elementos": { "type": "boolean" },
+        "resumo": { "type": "string" }
+      }
+    },
+    "hierarquia_visual": {
+      "type": "object",
+      "required": ["cta_visivel_acima_da_dobra", "contraste_cta", "observacoes"],
+      "additionalProperties": false,
+      "properties": {
+        "cta_visivel_acima_da_dobra": { "type": "boolean" },
+        "contraste_cta": { "type": "string", "enum": ["bom", "fraco"] },
+        "observacoes": { "type": "string" }
+      }
+    },
+    "ux_mobile": {
+      "type": "object",
+      "required": ["legibilidade", "botoes_adequados", "scroll_excessivo", "observacoes"],
+      "additionalProperties": false,
+      "properties": {
+        "legibilidade": { "type": "string", "enum": ["boa", "media", "ruim"] },
+        "botoes_adequados": { "type": "boolean" },
+        "scroll_excessivo": { "type": "boolean" },
+        "observacoes": { "type": "string" }
+      }
+    },
+    "problemas_visuais": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": ["problema", "prioridade", "recomendacao"],
+        "additionalProperties": false,
+        "properties": {
+          "problema": { "type": "string" },
+          "prioridade": { "type": "string", "enum": ["alta", "media", "baixa"] },
+          "recomendacao": { "type": "string" }
+        }
+      }
+    },
+    "limitacoes_da_analise": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 6
+    },
+    "reasoning": { "type": "string", "maxLength": 900 }
+  }
+}

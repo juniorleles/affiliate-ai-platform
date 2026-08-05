@@ -1,9 +1,12 @@
 // MÓDULO: discovery — rotas
+// Descoberta automática removida do escopo (ver service.js) — cadastro
+// manual é o único caminho.
 
 const express = require('express');
 const { requireAdmin } = require('../../shared/auth/middleware');
 const repo = require('./repository');
 const service = require('./service');
+const lpAudit = require('./lpAudit');
 
 const router = express.Router();
 
@@ -12,24 +15,6 @@ router.get('/', requireAdmin, async (req, res) => {
   res.json({ products });
 });
 
-// POST /api/products/sync/digistore24  { searchTerm?, minCommission? }
-router.post('/sync/:networkType', requireAdmin, async (req, res) => {
-  try {
-    const { searchTerm, minCommission } = req.body || {};
-    const result = await service.syncNetwork(req.params.networkType, { searchTerm, minCommission });
-    res.json(result);
-  } catch (err) {
-    console.error('Erro ao sincronizar rede de afiliados:', err);
-    res.status(502).json({ error: err.message || 'Falha ao sincronizar rede de afiliados.' });
-  }
-});
-
-// Cadastro manual de 1 produto — fallback enquanto a automação de uma rede não
-// tem endpoint de listagem confirmado (ver docs/ARQUITETURA.md, Fase 2, nota
-// sobre listMarketplaceEntries do Digistore24). Roda o mesmo pipeline de
-// upsert + Economics que o sync automático rodaria.
-// Body: { networkType, externalId, name, category?, price?, commissionType,
-//         commissionValue, epc?, conversionRate, countriesAllowed?, salesPageUrl?, minCommission? }
 router.post('/manual', requireAdmin, async (req, res) => {
   try {
     const result = await service.addManualProduct(req.body);
@@ -49,6 +34,41 @@ router.post('/manual/bulk', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('Erro ao cadastrar produtos em lote:', err);
     res.status(400).json({ error: err.message || 'Falha ao cadastrar produtos.' });
+  }
+});
+
+// Fase 3d, Camada A — Auditor de LP avançado (texto + PageSpeed, sem visão).
+// Body opcional: { adInfo: {headline, description, cta}, targetInfo: {publicoAlvo, pais, keywordPrincipal, keywordsSecundarias} }
+router.post('/:productId/lp-audit/advanced', requireAdmin, async (req, res) => {
+  try {
+    const product = await repo.findProductById(req.params.productId);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
+
+    const { adInfo, targetInfo } = req.body || {};
+    const result = await lpAudit.runAdvancedAuditTextOnly(product, { adInfo, targetInfo });
+    res.json(result);
+  } catch (err) {
+    console.error('Erro na auditoria avançada de LP:', err);
+    res.status(502).json({ error: err.message || 'Falha ao rodar a auditoria avançada.' });
+  }
+});
+
+router.get('/:productId/lp-audit/advanced', requireAdmin, async (req, res) => {
+  const audit = await lpAudit.getLatestAdvancedAudit(req.params.productId);
+  res.json({ audit });
+});
+
+// Fase 3d, Camada B — análise visual via screenshot (desktop + mobile).
+router.post('/:productId/lp-audit/visual', requireAdmin, async (req, res) => {
+  try {
+    const product = await repo.findProductById(req.params.productId);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado.' });
+
+    const result = await lpAudit.runAdvancedAuditVisual(product);
+    res.json(result);
+  } catch (err) {
+    console.error('Erro na auditoria visual de LP:', err);
+    res.status(502).json({ error: err.message || 'Falha ao rodar a auditoria visual.' });
   }
 });
 

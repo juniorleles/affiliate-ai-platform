@@ -142,3 +142,58 @@ tr:last-child td { border-bottom: none; }
 @media (max-width: 800px) {
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Fase 3c — cadastro de produtos */
+.products-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+
+.product-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.product-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.product-card-title { font-family: 'Space Grotesk', sans-serif; font-size: 0.92rem; font-weight: 600; line-height: 1.3; }
+.product-card-network { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.product-card-metrics { display: flex; gap: 14px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
+.product-card-metrics span { color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; display: block; margin-bottom: 2px; font-family: 'Inter', sans-serif; }
+.product-card-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.product-card-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
+.product-card-actions .btn { flex: 1; font-size: 0.75rem; padding: 7px 10px; text-align: center; }
+
+.pending-badge { font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; background: var(--panel-raised); color: var(--amber); border: 1px dashed var(--amber); }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(6,10,20,0.75);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 20px; overflow-y: auto; z-index: 100;
+}
+.modal-box {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 28px; width: 100%; max-width: 560px;
+}
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.modal-header h2 { font-family: 'Space Grotesk', sans-serif; font-size: 1.05rem; margin: 0; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; line-height: 1; padding: 4px; }
+.modal-close:hover { color: var(--text); }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-grid .field-full { grid-column: 1 / -1; }
+
+.economics-preview {
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+  background: var(--panel-raised); margin: 4px 0 6px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.economics-preview.viavel { border-color: var(--green); }
+.economics-preview.rejeitado_por_economics, .economics-preview.rejeitado_por_comissao_minima { border-color: var(--red); }
+.economics-preview .ep-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; }
+.economics-preview .ep-value { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; }
+
+.collapsible-toggle {
+  background: none; border: none; color: var(--green); font-size: 0.8rem; cursor: pointer;
+  padding: 6px 0; text-align: left; font-weight: 500;
+}
+
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text); }
+.checkbox-row input { width: 16px; height: 16px; }

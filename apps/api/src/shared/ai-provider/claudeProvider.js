@@ -14,12 +14,25 @@ function getClient() {
   return client;
 }
 
-async function complete({ systemPrompt, userPrompt, model = DEFAULT_MODEL, maxTokens = 800 }) {
+async function complete({ systemPrompt, userPrompt, model = DEFAULT_MODEL, maxTokens = 800, images }) {
+  // `images`: array de { base64, mediaType } — usado pela Camada B do Auditor de LP
+  // (5.4), a única parte do sistema que envia imagem em vez de só texto.
+  const content = [];
+  if (images?.length) {
+    for (const img of images) {
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mediaType || 'image/jpeg', data: img.base64 },
+      });
+    }
+  }
+  content.push({ type: 'text', text: userPrompt });
+
   const response = await getClient().messages.create({
     model,
     max_tokens: maxTokens,
     system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
+    messages: [{ role: 'user', content }],
   });
 
   const text = response.content

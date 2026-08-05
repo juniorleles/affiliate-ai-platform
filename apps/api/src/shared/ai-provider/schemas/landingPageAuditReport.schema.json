@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "landingPageAuditReport",
+  "type": "object",
+  "required": [
+    "landing_page_conversion_score",
+    "score_classification",
+    "diagnostico_geral",
+    "pontos_positivos",
+    "principais_problemas",
+    "top_5_melhorias",
+    "proposta_de_valor",
+    "oferta",
+    "cta",
+    "confianca_prova_social",
+    "intencao_pagina",
+    "limitacoes_da_analise",
+    "reasoning"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "landing_page_conversion_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "score_classification": {
+      "type": "string",
+      "enum": ["excelente", "muito_boa", "boa", "precisa_melhorias", "fraca", "critica"]
+    },
+    "diagnostico_geral": { "type": "string", "maxLength": 1200 },
+    "pontos_positivos": { "type": "array", "items": { "type": "string" }, "maxItems": 6 },
+    "principais_problemas": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["problema", "por_que_importa", "recomendacao", "prioridade", "impacto_esperado"],
+        "additionalProperties": false,
+        "properties": {
+          "problema": { "type": "string" },
+          "por_que_importa": { "type": "string" },
+          "recomendacao": { "type": "string" },
+          "prioridade": { "type": "string", "enum": ["alta", "media", "baixa"] },
+          "impacto_esperado": { "type": "string", "enum": ["baixo", "medio", "alto"] }
+        }
+      }
+    },
+    "top_5_melhorias": { "type": "array", "items": { "type": "string" }, "maxItems": 5 },
+    "correspondencia_google_ads": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "classificacao": { "type": "string", "enum": ["excelente", "boa", "regular", "ruim", "critica"] },
+        "explicacao": { "type": "string" }
+      }
+    },
+    "proposta_de_valor": {
+      "type": "object",
+      "required": ["forca", "explicacao"],
+      "additionalProperties": false,
+      "properties": {
+        "forca": { "type": "string", "enum": ["forte", "mediana", "fraca", "confusa", "generica"] },
+        "explicacao": { "type": "string" },
+        "sugestoes_headline": { "type": "array", "items": { "type": "string" }, "maxItems": 3 }
+      }
+    },
+    "oferta": {
+      "type": "object",
+      "required": ["forca", "explicacao"],
+      "additionalProperties": false,
+      "properties": {
+        "forca": { "type": "string", "enum": ["forte", "razoavel", "fraca", "confusa"] },
+        "explicacao": { "type": "string" }
+      }
+    },
+    "cta": {
+      "type": "object",
+      "required": ["avaliacao", "sugestoes"],
+      "additionalProperties": false,
+      "properties": {
+        "avaliacao": { "type": "string" },
+        "sugestoes": { "type": "array", "items": { "type": "string" }, "maxItems": 3 }
+      }
+    },
+    "confianca_prova_social": {
+      "type": "object",
+      "required": ["presente", "elementos_identificados", "objecoes_nao_respondidas"],
+      "additionalProperties": false,
+      "properties": {
+        "presente": { "type": "boolean" },
+        "elementos_identificados": { "type": "array", "items": { "type": "string" }, "maxItems": 6 },
+        "objecoes_nao_respondidas": { "type": "array", "items": { "type": "string" }, "maxItems": 6 }
+      }
+    },
+    "intencao_pagina": {
+      "type": "string",
+      "enum": ["educa", "gera_interesse", "gera_desejo", "conduz_compra", "solicita_compra"]
+    },
+    "limitacoes_da_analise": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 8
+    },
+    "reasoning": { "type": "string", "maxLength": 1200 }
+  }
+}

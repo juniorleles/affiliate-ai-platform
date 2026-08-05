@@ -17,7 +17,19 @@ function loadSchema(schemaName) {
 }
 
 function cleanJsonText(text) {
-  return text.replace(/```json|```/g, '').trim();
+  let cleaned = text.replace(/```json|```/g, '').trim();
+
+  // Se ainda sobrar texto antes/depois do objeto JSON (a IA às vezes escreve uma
+  // frase de preâmbulo mesmo sendo instruída a não fazer isso), extrai só o miolo
+  // entre a primeira { e a última } — mais tolerante que exigir o texto inteiro
+  // já vir limpo. Achado real em 2026-08-05, schema landingPageAuditReport.
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace > 0 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  }
+
+  return cleaned;
 }
 
 /**
@@ -36,8 +48,11 @@ function cleanJsonText(text) {
  *   espaço que um veredito simples — passar explícito por chamada evita pagar o custo
  *   de um limite alto em toda chamada só porque uma precisa (ver docs/ARQUITETURA.md,
  *   incidente de truncamento de 2026-08-04).
+ * @param {Array<{base64: string, mediaType?: string}>} [params.images] - imagens
+ *   (screenshot) pra análise visual — só suportado no provider Claude por ora
+ *   (única parte do sistema que usa isso é a Camada B do Auditor de LP, 5.4).
  */
-async function analyze({ schema, systemPrompt, context, provider, model, maxTokens }) {
+async function analyze({ schema, systemPrompt, context, provider, model, maxTokens, images }) {
   const schemaDef = loadSchema(schema);
   const validate = ajv.compile(schemaDef);
 
@@ -54,6 +69,7 @@ async function analyze({ schema, systemPrompt, context, provider, model, maxToke
       userPrompt,
       model,
       maxTokens,
+      images,
     });
 
     let parsed;
