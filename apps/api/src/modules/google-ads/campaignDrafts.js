@@ -17,7 +17,7 @@ const repo = require('./repository');
 
 const MAX_DAILY_BUDGET = Number(process.env.MAX_DAILY_BUDGET_HARD_CAP || 100);
 
-async function createDraft({ productId, googleAdsAccountId, name, dailyBudget }) {
+async function createDraft({ productId, googleAdsAccountId, name, dailyBudget, excludeKeywordTerms }) {
   if (!productId || !name || dailyBudget == null) {
     throw Object.assign(new Error('productId, name e dailyBudget são obrigatórios.'), { status: 400 });
   }
@@ -43,8 +43,18 @@ async function createDraft({ productId, googleAdsAccountId, name, dailyBudget })
     }
   }
 
+  // Achado real (2026-08-05): a pesquisa de keyword (Fase 2b) traz "ideias
+  // relacionadas" que incluem nomes de marca de CONCORRENTES (ex: "xtend bcaa",
+  // "kion aminos" apareceram pra um produto de aminoácido) — o Google Keyword
+  // Planner faz isso de propósito (mostra o que gente busca "vs"), mas não
+  // deveria virar sugestão automática de compra sem aviso. Sem uma lista de
+  // marcas mantida, não dá pra detectar isso 100% sozinho — por isso aceita
+  // `excludeKeywordTerms` (você já sabe quais marcas evitar) e sempre avisa no
+  // texto de cópia pra revisar antes de usar (ver formatDraftForCopy).
+  const excludeSet = new Set((excludeKeywordTerms || []).map(t => t.toLowerCase().trim()).filter(Boolean));
   const topKeywords = (keywordMetrics || [])
     .filter(k => k.top_of_page_bid_low != null)
+    .filter(k => !excludeSet.has(k.keyword_text.toLowerCase().trim()))
     .sort((a, b) => (Number(b.avg_monthly_searches) || 0) - (Number(a.avg_monthly_searches) || 0))
     .slice(0, 10)
     .map(k => ({ text: k.keyword_text, matchType: 'phrase' }));
@@ -134,6 +144,10 @@ function formatDraftForCopy(draft) {
     '',
     `PALAVRAS-CHAVE (${keywords.length}):`,
     ...keywords.map(k => `  ${(matchSymbol[k.matchType] || matchSymbol.phrase)(k.text)}`),
+    '  ⚠️  Revise antes de colar: keywords de pesquisa geral podem incluir nome de',
+    '      marca de CONCORRENTE (ex: apareceu "xtend"/"kion" numa pesquisa real de',
+    '      suplemento). O sistema não filtra marca automaticamente com confiança —',
+    '      use excludeKeywordTerms ao gerar o rascunho pra remover as que você já conhece.',
     '',
     `HEADLINES (${headlines.length}):`,
     ...headlines.map((h, i) => `  ${i + 1}. ${h} (${h.length} caracteres)`),

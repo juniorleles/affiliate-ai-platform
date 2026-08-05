@@ -1,12 +1,12 @@
 # Arquitetura — Plataforma Privada de IA para Marketing de Afiliados
 
-Versão 2.4 · Documento vivo (atualizar a cada mudança estrutural relevante)
+Versão 2.5 · Documento vivo (atualizar a cada mudança estrutural relevante)
 
 Changelog:
-- v2.4 removeu a escrita automática no Google Ads da Fase 6 (decisão do usuário) —
-  `campaignBuilder.js` deletado, fluxo virou "rascunho pronto pra copiar" (texto
-  formatado + botão de copiar), criação da campanha sempre manual pelo usuário.
-  Reduz o risco técnico do projeto significativamente sem perder valor real.
+- v2.5 validou a Fase 6 com dado real de ponta a ponta pela UI. 2 achados reais
+  corrigidos: truncamento de JSON na geração de copy (mesmo padrão da Fase 3b) e
+  sugestão de palavra-chave de marca de concorrente sem aviso (corrigido com
+  excludeKeywordTerms + aviso permanente no texto de cópia).
 - v1.4 removeu formalmente a descoberta automática de produtos do escopo do projeto
   (decisão do usuário) — connector Digistore24 e rota de sync automático deletados do
   código; Fase 2 e Fase 5 reescritas pra refletir cadastro manual como caminho definitivo,
@@ -692,9 +692,7 @@ agora é só usar o cadastro manual que já existe, sem código novo.
 ---
 
 ### Fase 6 — Rascunho de Campanha (criação manual pelo usuário)
-**Status: 🟡 código completo (2026-08-05), ⏳ pendente de teste real. Risco bem
-menor que a versão original — decisão de 2026-08-05 removeu a escrita
-automática no Google Ads antes mesmo do primeiro teste.**
+**Status: ✅ completa e testada com dado real (2026-08-05).**
 
 - Objetivo: fechar o loop que hoje para em "vale a pena anunciar?" (Fase 3b),
   sem o sistema precisar escrever no Google Ads. A IA prepara orçamento
@@ -724,18 +722,16 @@ automática no Google Ads antes mesmo do primeiro teste.**
     (texto simples, pronto pra ler e digitar no Google Ads).
   - Frontend: `CampaignDraftsPage`, `CampaignDraftModal`, `CampaignDraftDetail`
     (com botão "Copiar tudo" e aprovação/marcação de uso).
-- Checklist de teste (nenhum item testado ainda):
-  - [ ] Criar 1 rascunho real e revisar se copy/keywords fazem sentido
-  - [ ] Confirmar que orçamento acima de R$ 100/dia é rejeitado antes de gravar
-  - [ ] Aprovar o rascunho, copiar o texto formatado, criar a campanha manualmente
-    no Google Ads, e marcar como usado
-  - [ ] Conferir se o texto de `copy-text` está genuinamente fácil de usar (não
-    só tecnicamente correto) — isso é uma tela pra você usar de verdade, vale
-    o teste de usabilidade, não só de funcionamento
-- Definição de pronto: gerar 1 rascunho real, usar o texto pra criar a
-  campanha manualmente no Google Ads sem precisar digitar nada que o sistema
-  já não tivesse preparado.
-- **Endpoints**: `POST /api/campaigns/drafts`, `GET /api/campaigns/drafts`,
+- Checklist de teste:
+  - [x] Criar 1 rascunho real (Advanced Amino Formula, EUR 30/dia) e revisar copy/keywords — copy fez sentido (8 aminos, recuperação, vs BCAA, vegano, garantia 90 dias), limites de RSA respeitados (headlines ≤30, descrições ≤90)
+  - [x] Confirmar que orçamento acima de R$ 100/dia é rejeitado antes de gravar — HTTP 400 confirmado, zero rascunhos criados
+  - [x] Aprovar → copiar texto formatado → marcar como usado — fluxo completo testado na UI, badge mudou corretamente em cada etapa
+  - [x] Teste de usabilidade real do `copy-text`: "Dá pra montar a RSA no Google Ads só com isso" — validação direta do usuário, não só funcionamento técnico
+- **2 achados reais corrigidos no mesmo dia**:
+  1. **Truncamento de JSON** (mesma categoria do incidente da Fase 3b): `maxTokens: 2048` não bastava pra `generateAdCopy()` — subiu pra 4096, e um exemplo de formato foi injetado no prompt (mesmo padrão que já estabilizou o Auditor de LP).
+  2. **Palavra-chave de marca de concorrente sugerida sem aviso**: a pesquisa de keyword (Fase 2b) trouxe "xtend bcaa", "kion aminos", "bodyhealth perfectamino" — nomes de marcas concorrentes, não termos genéricos — junto com o resto por causa de como o Keyword Planner gera "ideias relacionadas". Corrigido com `excludeKeywordTerms` (campo na tela, filtra antes de gerar o rascunho) **e** aviso permanente no texto de cópia, já que não dá pra detectar marca de terceiro com 100% de confiança sem uma lista mantida — a responsabilidade final de revisar continua sendo do usuário, o sistema só facilita.
+- Definição de pronto: ✅ atingida — rascunho real gerado, revisado e "usado" de ponta a ponta pela UI, com o próprio usuário confirmando que o texto é suficiente pra criar a campanha sem digitar nada a mais.
+- **Endpoints**: `POST /api/campaigns/drafts` (aceita `excludeKeywordTerms` opcional), `GET /api/campaigns/drafts`,
   `GET /api/campaigns/drafts/:id`, `GET /api/campaigns/drafts/:id/copy-text`,
   `POST /api/campaigns/drafts/:id/approve`, `POST /api/campaigns/drafts/:id/mark-as-used`
 

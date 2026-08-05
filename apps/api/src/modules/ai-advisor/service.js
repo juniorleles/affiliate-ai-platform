@@ -429,20 +429,25 @@ Responda SOMENTE com um objeto JSON válido, sem markdown, sem texto fora do JSO
 seguindo exatamente o schema fornecido.
 
 Regras:
-- "headlines": gere exatamente 10 headlines, cada uma com NO MÁXIMO 30 caracteres
-  (limite real do Google Ads — conte os caracteres, não estime). Varie o ângulo:
-  benefício principal, urgência/oferta (só se houver base real pra isso no contexto),
-  nome do produto, palavra-chave principal.
-- "descriptions": gere exatamente 3 descrições, cada uma com NO MÁXIMO 90 caracteres.
-  Reforce o benefício e inclua uma chamada pra ação clara.
-- Exemplo da forma EXATA (preencha com copy real; respeite maxLength de cada string):
-  {"headlines":["H1 (≤30)","H2","...até 10"],"descriptions":["D1 (≤90)","D2","D3"],
-  "correspondence_check":{"aligned":true,"notes":"..."},"reasoning":"..."}
+- "headlines": 8 a 15 headlines, cada uma com NO MÁXIMO 30 caracteres (limite real
+  do Google Ads — conte os caracteres, não estime). Varie o ângulo: benefício
+  principal, urgência/oferta (só se houver base real pra isso no contexto), nome do
+  produto, palavra-chave principal.
+- "descriptions": 2 a 4 descrições, cada uma com NO MÁXIMO 90 caracteres. Reforce o
+  benefício e inclua uma chamada pra ação clara.
 - "correspondence_check": se o texto da landing page (texto_da_pagina) estiver
   disponível no contexto, confirme que a copy gerada é coerente com o que a página
   realmente entrega — "aligned: false" se você tiver que inventar algo que a página
   não sustenta pra gerar uma headline chamativa.
 - "reasoning": no máximo 120 palavras, em português, explicando as escolhas.
+
+Exemplo de formato de resposta (adapte o conteúdo, não copie os valores):
+{
+  "headlines": ["Nome do Produto", "Benefício Principal Aqui", "Garantia de 90 Dias"],
+  "descriptions": ["Descrição reforçando benefício e CTA claro para o usuário agir agora."],
+  "correspondence_check": { "aligned": true, "notes": "Copy consistente com o texto da página." },
+  "reasoning": "Escolhi headlines variando entre nome do produto, benefício e garantia porque..."
+}
 `.trim();
 
 /**
@@ -466,9 +471,7 @@ async function generateAdCopy({ product, pageText, keywords, economics }) {
     schema: 'adCopySuggestion',
     systemPrompt: AD_COPY_SYSTEM_PROMPT,
     context,
-    // 15 headlines + 4 descriptions + correspondence + reasoning cabem folgado
-    // em ~3–4k tokens; 2048 truncava o JSON no meio (achado 2026-08-05).
-    maxTokens: 4096,
+    maxTokens: 4096, // 2048 truncava o JSON (achado real, 2026-08-05) — mesmo padrão da Fase 3d
   });
 
   return { result, model, provider };

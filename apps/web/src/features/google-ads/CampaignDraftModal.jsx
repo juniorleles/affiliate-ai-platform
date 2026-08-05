@@ -6,6 +6,7 @@ export default function CampaignDraftModal({ onClose, onSaved }) {
   const [productId, setProductId] = useState('');
   const [name, setName] = useState('');
   const [dailyBudget, setDailyBudget] = useState('');
+  const [excludeTerms, setExcludeTerms] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -28,6 +29,7 @@ export default function CampaignDraftModal({ onClose, onSaved }) {
         productId: Number(productId),
         name: name.trim(),
         dailyBudget: Number(dailyBudget),
+        excludeKeywordTerms: excludeTerms.split(',').map(t => t.trim()).filter(Boolean),
       });
       onSaved();
     } catch (err) {
@@ -69,6 +71,11 @@ export default function CampaignDraftModal({ onClose, onSaved }) {
               <label>Orçamento diário *</label>
               <input type="number" step="0.01" value={dailyBudget} onChange={e => setDailyBudget(e.target.value)} placeholder="Máx. 100" />
             </div>
+          </div>
+
+          <div className="field field-full">
+            <label>Marcas de concorrente a excluir das palavras-chave (opcional, separadas por vírgula)</label>
+            <input value={excludeTerms} onChange={e => setExcludeTerms(e.target.value)} placeholder="Ex: xtend, kion, bodyhealth" />
           </div>
 
           {error && <div className="form-msg error">{error}</div>}
