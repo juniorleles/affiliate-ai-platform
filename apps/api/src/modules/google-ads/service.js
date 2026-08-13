@@ -1,4 +1,4 @@
-const { fetchCampaignMetrics, fetchAccountCurrency, fetchAccountStatus } = require('./googleAdsClient');
+const { fetchCampaignMetrics, fetchAccountCurrency, fetchAccountStatus, fetchAccountHierarchy } = require('./googleAdsClient');
 const keywordResearch = require('./keywordResearch');
 const repo = require('./repository');
 const discoveryRepo = require('../discovery/repository');
@@ -6,6 +6,7 @@ const { evaluateEconomics } = require('../market-intel/economics');
 const aiAdvisor = require('../ai-advisor/service');
 const pool = require('../../shared/db/pool');
 const fx = require('../../shared/fx');
+const { classifyKeywordIntent } = require('./keywordIntent');
 
 async function syncCampaigns() {
   const rows = await fetchCampaignMetrics();
@@ -71,7 +72,7 @@ async function researchKeywordsForProduct(productId, { seedKeyword, minCommissio
   const keyword = seedKeyword || product.name;
   const ideas = await keywordResearch.fetchKeywordIdeas({ seedKeyword: keyword });
 
-  if (ideas.length) await repo.insertKeywordMetrics(productId, ideas);
+  if (ideas.length) await repo.insertKeywordMetrics(productId, ideas, 'generic');
 
   const primary = ideas.find(k => k.keywordText.toLowerCase() === keyword.toLowerCase()) || ideas[0];
   let cpcLeilaoRaw = null;
@@ -107,6 +108,7 @@ async function researchKeywordsForProduct(productId, { seedKeyword, minCommissio
       taxaConversaoEsperada: Number(product.conversion_rate) || 0,
       comissaoMinima: minCommission,
       cpcLeilao,
+      moeda: productCurrency || '',
     });
 
     await pool.query(
@@ -127,15 +129,150 @@ async function getKeywordMetrics(productId) {
   return repo.getLatestKeywordMetrics(productId);
 }
 
+// Modificadores de intenção comercial (2026-08-05) — a pesquisa padrão de
+// keyword (seed genérico, ex: nome do produto) traz principalmente termo
+// informacional/comparativo, porque é assim que o Keyword Planner expande
+// "ideias relacionadas" de um seed genérico. Pra enriquecer o pool com termo
+// de fundo de funil de verdade, roda o MESMO Keyword Planner com seeds já
+// orientados a compra — não é uma API nova, é usar a existente com
+// intenção melhor no input.
+const COMMERCIAL_INTENT_MODIFIERS = [
+  base => `buy ${base}`,
+  base => `${base} price`,
+  base => `${base} discount`,
+  base => `${base} coupon`,
+  base => `where to buy ${base}`,
+];
+
+/**
+ * Roda o Keyword Planner várias vezes, uma por seed de intenção comercial,
+ * pra alimentar keyword_metrics com termo de fundo de funil. Não recalcula
+ * Economics (isso já acontece em researchKeywordsForProduct) — o objetivo
+ * aqui é só enriquecer o pool de candidatos que selectDraftKeywords() usa
+ * na Fase 6. Continua mesmo se 1 seed falhar, pra não perder o resto.
+ */
+async function researchCommercialIntentKeywords(productId, { baseSeed, modifiers } = {}) {
+  const product = await discoveryRepo.findProductById(productId);
+  if (!product) throw Object.assign(new Error('Produto não encontrado.'), { status: 404 });
+
+  const base = baseSeed || product.name;
+  const templates = (modifiers && modifiers.length)
+    ? modifiers.map(m => b => `${m} ${b}`.trim())
+    : COMMERCIAL_INTENT_MODIFIERS;
+  const seeds = templates.map(fn => fn(base));
+
+  const resultsPerSeed = [];
+  for (const seed of seeds) {
+    try {
+      const ideas = await keywordResearch.fetchKeywordIdeas({ seedKeyword: seed });
+      if (ideas.length) await repo.insertKeywordMetrics(productId, ideas, 'commercial_intent');
+      resultsPerSeed.push({ seed, found: ideas.length });
+    } catch (err) {
+      console.warn(`[keyword-research] Falha na busca de intenção comercial pro seed "${seed}":`, err.message);
+      resultsPerSeed.push({ seed, found: 0, error: err.message });
+    }
+  }
+
+  const allMetrics = await repo.getLatestKeywordMetrics(productId);
+  const bottomFunnelCount = allMetrics.filter(k => classifyKeywordIntent(k.keyword_text).stage === 'bottom').length;
+
+  return {
+    seedsUsed: seeds,
+    resultsPerSeed,
+    totalKeywordsAgora: allMetrics.length,
+    comSinalDeFundoDeFunilAgora: bottomFunnelCount,
+  };
+}
+
 async function getAccountCurrency() {
   return fetchAccountCurrency();
 }
 
 // --- Contas do Google Ads (Fase 7, suporte multi-conta) ---
 
-async function addAccount({ customerId, name, loginCustomerId, isDefault }) {
+async function addAccount({
+  customerId, name, loginCustomerId, isDefault,
+  mccId, operacao, marca, regiao, dominio, paymentMethodLabel, dailyBudgetCap,
+}) {
   if (!customerId) throw Object.assign(new Error('customerId é obrigatório.'), { status: 400 });
-  return repo.createAccount({ customerId, name, loginCustomerId, isDefault });
+  return repo.createAccount({
+    customerId, name, loginCustomerId, isDefault,
+    mccId, operacao, marca, regiao, dominio, paymentMethodLabel, dailyBudgetCap,
+  });
+}
+
+// --- Governança "guarda-chuva" (2026-08-05) ---
+
+async function addMcc({ mccCustomerId, name, parentMccId, notes }) {
+  if (!mccCustomerId || !name) {
+    throw Object.assign(new Error('mccCustomerId e name são obrigatórios.'), { status: 400 });
+  }
+  return repo.createMcc({ mccCustomerId, name, parentMccId, notes });
+}
+
+async function removeAccount(id) {
+  const deleted = await repo.deleteAccount(id);
+  if (!deleted) throw Object.assign(new Error('Conta não encontrada.'), { status: 404 });
+  return deleted;
+}
+
+async function removeMcc(id) {
+  try {
+    const deleted = await repo.deleteMcc(id);
+    if (!deleted) throw Object.assign(new Error('MCC não encontrada.'), { status: 404 });
+    return deleted;
+  } catch (err) {
+    if (err.code === '23503') { // violação de foreign key do Postgres
+      throw Object.assign(
+        new Error('Ainda existe conta vinculada a essa MCC — reparenta ou exclui a(s) conta(s) primeiro.'),
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Descobre as contas reais sob uma MCC via API do Google (2026-08-06) e faz
+ * upsert em google_ads_accounts — não sobrescreve campos de governança que
+ * você já preencheu manualmente (operacao/marca/payment_method_label/etc.),
+ * só cria contas novas encontradas e atualiza nome/status das que já existem.
+ * A API do Google não sabe "qual operação"/"qual marca" — isso continua
+ * sendo julgamento humano, preenchido depois na tela.
+ */
+async function syncAccountsFromMcc(mccId) {
+  const mccs = await repo.listMccs();
+  const mcc = mccs.find(m => m.id === Number(mccId));
+  if (!mcc) throw Object.assign(new Error('MCC não encontrada.'), { status: 404 });
+
+  const discovered = await fetchAccountHierarchy(mcc);
+  const existingAccounts = await repo.listAccounts();
+  const existingByCustomerId = new Map(existingAccounts.map(a => [a.customer_id, a]));
+
+  let created = 0, updated = 0, reparented = 0, skippedManagers = 0;
+  for (const acc of discovered) {
+    if (acc.isManager) { skippedManagers++; continue; } // sub-MCC, não é conta de gasto — não cadastra como "conta"
+
+    const existing = existingByCustomerId.get(acc.customerId);
+    if (existing) {
+      if (existing.mcc_id !== mcc.id) reparented++;
+      await repo.updateAccountFromSync(existing.id, { status: acc.status || 'unknown', mccId: mcc.id });
+      updated++;
+    } else {
+      await repo.createAccount({
+        customerId: acc.customerId,
+        name: acc.name,
+        mccId: mcc.id,
+      });
+      created++;
+    }
+  }
+
+  return { mccName: mcc.name, totalDiscovered: discovered.length, created, updated, reparented, skippedManagers };
+}
+
+async function getGovernanceRollup() {
+  return repo.getGovernanceRollup();
 }
 
 /**
@@ -164,6 +301,7 @@ module.exports = {
   analyzeCampaign,
   getCampaignHistory,
   researchKeywordsForProduct,
+  researchCommercialIntentKeywords,
   getKeywordMetrics,
   getAccountCurrency,
   listAllCampaigns: repo.listAllCampaigns,
@@ -171,5 +309,11 @@ module.exports = {
   getAffiliateStatsForCampaign: repo.getAffiliateStatsForCampaign,
   listAccounts: repo.listAccounts,
   addAccount,
+  removeAccount,
   refreshAllAccountStatuses,
+  listMccs: repo.listMccs,
+  addMcc,
+  removeMcc,
+  getGovernanceRollup,
+  syncAccountsFromMcc,
 };

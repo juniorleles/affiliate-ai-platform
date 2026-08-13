@@ -247,7 +247,7 @@ async function evaluateProductOpportunity({ productId, product, economics, keywo
     schema: 'productOpportunity',
     systemPrompt: PRODUCT_OPPORTUNITY_SYSTEM_PROMPT,
     context,
-    maxTokens: 2048, // schema maior (2 arrays + reasoning de até 200 palavras) — 800 (padrão) truncava, ver docs/ARQUITETURA.md
+    maxTokens: 4096, // 2048 truncava o JSON no Reanalisar (achado real, 2026-08-05, testando a tela de Market Intel) — mesmo padrão dos outros ajustes de hoje
   });
 
   const saved = await repo.recordAnalysis({
@@ -287,6 +287,22 @@ Regras:
   social, correspondência com o anúncio) — não inclui design/visual/mobile, que exigem
   análise de imagem (não disponível aqui). Sempre mencione essa limitação em
   "limitacoes_da_analise".
+- "score_classification": a faixa correspondente ao score acima, sempre preenchida
+  (excelente/muito_boa/boa/precisa_melhorias/fraca/critica) — nunca deixe implícita.
+- "diagnostico_geral": até 1200 caracteres, um parágrafo corrido resumindo o veredito
+  geral da página antes de entrar nos detalhes — a leitura rápida de "o que essa
+  página é e como ela se sai", não uma lista.
+- "pontos_positivos": até 6 itens curtos do que a página já faz bem — mesmo uma página
+  fraca costuma ter algo funcionando; não pule esse campo mesmo em avaliação ruim.
+- "oferta": force ("forte"/"razoavel"/"fraca"/"confusa") + explicacao — avalie a
+  clareza e atratividade da OFERTA em si (preço, garantia, bônus, urgência), separado
+  da proposta de valor (que é sobre o PRODUTO, não a oferta comercial).
+- "intencao_pagina": classifique a página numa destas 5 etapas de intenção
+  (educa/gera_interesse/gera_desejo/conduz_compra/solicita_compra) — em que ponto da
+  jornada de decisão essa página está pensada pra atuar.
+- "top_5_melhorias": até 5 ações concretas, priorizadas pelo maior impacto potencial
+  na conversão — resumo executivo do que fazer primeiro, derivado de
+  "principais_problemas" mas mais curto e acionável.
 - "correspondencia_google_ads": null se não houver dados de anúncio/keyword no contexto.
   Quando houver, compare Keyword → Anúncio → Landing Page e avalie se a promessa do
   anúncio é cumprida na página.
@@ -297,7 +313,9 @@ Regras:
 - "confianca_prova_social.objecoes_nao_respondidas": objeções de compra comuns que o
   texto da página não trata.
 - "principais_problemas": priorize por impacto potencial na conversão, não por
-  quantidade. Cada item precisa de recomendação prática, não só "está ruim".
+  quantidade. Cada item PRECISA dos 5 campos: "problema" (o que está errado),
+  "por_que_importa" (por que isso afeta conversão), "recomendacao" (ação prática, não
+  só "está ruim"), "prioridade" (alta/media/baixa) e "impacto_esperado" (baixo/medio/alto).
 - "limitacoes_da_analise": SEMPRE inclua ao menos a limitação de que design visual, UX
   mobile real e caminho até o checkout (quando a URL de checkout não foi fornecida ou
   não pôde ser lida) não foram avaliados nesta análise. Se algum outro dado não estava
@@ -471,7 +489,12 @@ async function generateAdCopy({ product, pageText, keywords, economics }) {
     schema: 'adCopySuggestion',
     systemPrompt: AD_COPY_SYSTEM_PROMPT,
     context,
-    maxTokens: 4096, // 2048 truncava o JSON (achado real, 2026-08-05) — mesmo padrão da Fase 3d
+    maxTokens: 8192, // 4096 voltou a truncar (achado real, 2026-08-11, Bloco 5 do
+    // Roteiro de Teste) — efeito colateral direto da correção sistêmica de schema
+    // (index.js#analyze() agora manda o schema JSON completo, "maxItems: 15" pros
+    // headlines incluso) — o modelo passou a preencher o array até o teto com mais
+    // consistência do que quando só via a contagem sugerida na prosa do prompt.
+    // Mesmo padrão de sempre: dobrar o teto em vez de tentar prever o tamanho exato.
   });
 
   return { result, model, provider };

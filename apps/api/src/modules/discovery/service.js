@@ -88,6 +88,7 @@ async function evaluateAndStoreEconomics(networkId, product, minCommission) {
       comissaoEsperada: product.commissionValue,
       taxaConversaoEsperada: product.conversionRate ?? 0,
       comissaoMinima: minCommission,
+      moeda: product.currency || '',
     });
   } catch (err) {
     economics = { status: 'erro_avaliacao', motivo: err.message };
@@ -174,7 +175,15 @@ async function addManualProduct(input) {
     });
   }
 
-  return { product, economics, compliance: complianceResult, lpAudit: lpAuditResult };
+  // Bug real corrigido em 2026-08-11 (achado seguindo o Roteiro de Teste,
+  // Bloco 1): `productId` era calculado e usado internamente (Compliance,
+  // Auditoria de LP) o tempo todo, mas nunca era anexado de volta no objeto
+  // `product` devolvido na resposta — quem cadastra um produto não tinha
+  // como saber o `id` dele sem fazer uma segunda chamada (GET /products) ou
+  // vasculhar `compliance.compliance.product_id`. Um POST que cria um
+  // recurso devolver o recurso sem o próprio identificador é contrato de
+  // API quebrado, não só inconveniência.
+  return { product: { ...product, id: productId }, economics, compliance: complianceResult, lpAudit: lpAuditResult };
 }
 
 /**

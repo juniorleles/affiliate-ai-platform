@@ -23,7 +23,13 @@ async function listProducts({ networkId, status } = {}) {
       lpa.has_cta,
       lpa.has_vsl,
       lpa.affiliate_params_preserved,
-      lpa.audited_at AS lp_audited_at
+      lpa.audited_at AS lp_audited_at,
+      de.score AS decision_opportunity_score,
+      de.confidence_score AS decision_confidence_score,
+      de.decision_status,
+      de.evidence_stage AS decision_evidence_stage,
+      de.stopped_reason AS decision_stopped_reason,
+      de.computed_at AS decision_computed_at
     FROM products p
     JOIN networks n ON n.id = p.network_id
     LEFT JOIN LATERAL (
@@ -44,6 +50,12 @@ async function listProducts({ networkId, status } = {}) {
       ORDER BY audited_at DESC
       LIMIT 1
     ) lpa ON true
+    LEFT JOIN LATERAL (
+      SELECT * FROM opportunity_scores
+      WHERE product_id = p.id AND model_version = 'evidence-engine-v1'
+      ORDER BY computed_at DESC
+      LIMIT 1
+    ) de ON true
     ${where}
     ORDER BY p.last_seen_at DESC
   `, params);

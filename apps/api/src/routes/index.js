@@ -7,6 +7,8 @@ const monitoringRoutes = require('../modules/monitoring/routes');
 const discoveryRoutes = require('../modules/discovery/routes');
 const marketIntelRoutes = require('../modules/market-intel/routes');
 const competitiveIntelRoutes = require('../modules/competitive-intel/routes');
+const usersRoutes = require('../modules/users/routes');
+const decisionEngineRoutes = require('../modules/decision-engine/routes');
 
 const router = express.Router();
 
@@ -20,5 +22,12 @@ router.use('/monitoring', monitoringRoutes);
 router.use('/products', discoveryRoutes);
 router.use('/market-intel', marketIntelRoutes);
 router.use('/competitive-intel', competitiveIntelRoutes);
+router.use('/decision-engine', decisionEngineRoutes);
+
+// Autenticação/gestão de EQUIPE interna (JWT + perfis, 2026-08-05) — prefixo
+// /staff pra não colidir com /auth/login que affiliate-ops já usa pra afiliados
+// (sistemas de login conceitualmente diferentes: afiliado que clica em link
+// vs. equipe interna gerenciando a plataforma).
+router.use('/staff', usersRoutes);
 
 module.exports = router;

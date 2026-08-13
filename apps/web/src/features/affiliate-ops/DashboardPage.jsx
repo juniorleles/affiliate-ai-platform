@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 
 function fmtMoney(v) { return 'R$ ' + Number(v || 0).toFixed(2); }
@@ -10,16 +11,37 @@ function fmtDate(iso) {
 export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
   const [affiliates, setAffiliates] = useState([]);
+  const [platform, setPlatform] = useState(null);
   const [loading, setLoading] = useState(true);
 
   async function loadAll() {
     setLoading(true);
-    const [summaryData, affiliatesData] = await Promise.all([
+    const [summaryData, affiliatesData, productsData, draftsData, competitiveData, alertsData] = await Promise.all([
       api.get('/dashboard/summary'),
       api.get('/affiliates'),
+      api.get('/products').catch(() => ({ products: [] })),
+      api.get('/campaigns/drafts').catch(() => ({ drafts: [] })),
+      api.get('/competitive-intel').catch(() => ({ ads: [] })),
+      api.get('/monitoring/alerts').catch(() => ({ alerts: [] })),
     ]);
     setSummary(summaryData);
     setAffiliates(affiliatesData.affiliates);
+
+    const products = productsData.products || [];
+    const drafts = draftsData.drafts || [];
+    const ads = competitiveData.ads || [];
+    const alerts = alertsData.alerts || [];
+
+    setPlatform({
+      totalProdutos: products.length,
+      produtosViaveis: products.filter(p => p.economics_status === 'viavel').length,
+      auditoriaPendente: products.filter(p => p.lp_audited_at == null).length,
+      totalRascunhos: drafts.length,
+      rascunhosAprovados: drafts.filter(d => d.status === 'approved' || d.status === 'created_in_google_ads').length,
+      concorrentesMapeados: new Set(ads.map(a => a.competitor_name)).size,
+      alertasAbertos: alerts.filter(a => a.status === 'open').length,
+    });
+
     setLoading(false);
   }
 
@@ -31,12 +53,41 @@ export default function DashboardPage() {
     loadAll();
   }
 
-  if (loading || !summary) return <div className="empty-state">Carregando...</div>;
+  if (loading || !summary || !platform) return <div className="empty-state">Carregando...</div>;
 
   const t = summary.totals;
 
   return (
     <>
+      <h2 style={{ margin: '0 0 12px', fontFamily: 'Space Grotesk, sans-serif', fontSize: '1.05rem' }}>Visão geral</h2>
+      <div className="kpi-strip">
+        <Link to="/products" className="kpi" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="kpi-label">Produtos cadastrados</div>
+          <div className="kpi-value">{platform.totalProdutos}</div>
+        </Link>
+        <Link to="/products" className="kpi" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="kpi-label">Viáveis (Economics)</div>
+          <div className="kpi-value green">{platform.produtosViaveis}</div>
+        </Link>
+        <Link to="/products" className="kpi" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="kpi-label">Auditoria de LP pendente</div>
+          <div className="kpi-value amber">{platform.auditoriaPendente}</div>
+        </Link>
+        <Link to="/campaign-drafts" className="kpi" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="kpi-label">Rascunhos de campanha</div>
+          <div className="kpi-value">{platform.rascunhosAprovados}/{platform.totalRascunhos}</div>
+        </Link>
+        <Link to="/competitive-intel" className="kpi" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="kpi-label">Concorrentes mapeados</div>
+          <div className="kpi-value">{platform.concorrentesMapeados}</div>
+        </Link>
+        <Link to="/alerts" className="kpi" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="kpi-label">Alertas abertos</div>
+          <div className={`kpi-value ${platform.alertasAbertos > 0 ? 'amber' : ''}`}>{platform.alertasAbertos}</div>
+        </Link>
+      </div>
+
+      <h2 style={{ margin: '28px 0 12px', fontFamily: 'Space Grotesk, sans-serif', fontSize: '1.05rem' }}>Afiliados (Affiliate Ops)</h2>
       <div className="kpi-strip">
         <div className="kpi"><div className="kpi-label">Afiliados ativos</div><div className="kpi-value">{t.active_affiliates}/{t.total_affiliates}</div></div>
         <div className="kpi"><div className="kpi-label">Cliques</div><div className="kpi-value">{t.total_clicks}</div></div>

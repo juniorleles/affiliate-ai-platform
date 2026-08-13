@@ -110,6 +110,10 @@ tr:last-child td { border-bottom: none; }
 .verdict.decrease_budget { background: rgba(245,166,35,0.18); color: var(--amber); }
 .verdict.pause { background: rgba(240,87,122,0.18); color: var(--red); }
 .verdict.none { background: var(--panel-raised); color: var(--text-muted); border: 1px dashed var(--border); }
+.verdict.viavel, .verdict.worth-yes, .verdict.low { background: rgba(61,220,151,0.18); color: var(--green); }
+.verdict.rejeitado_por_economics, .verdict.medium { background: rgba(245,166,35,0.18); color: var(--amber); }
+.verdict.rejeitado_por_comissao_minima, .verdict.worth-no, .verdict.high, .verdict.erro_avaliacao { background: rgba(240,87,122,0.18); color: var(--red); }
+.verdict.dado_insuficiente { background: var(--panel-raised); color: var(--text-muted); border: 1px dashed var(--border); }
 
 .confidence-dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:5px; }
 .confidence-dot.high { background: var(--green); }
@@ -197,3 +201,41 @@ tr:last-child td { border-bottom: none; }
 
 .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text); }
 .checkbox-row input { width: 16px; height: 16px; }
+
+/* Fase 10 — Painel NOC (árvore + heatmap) */
+.health-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.health-dot.green { background: var(--green); box-shadow: 0 0 6px rgba(61,220,151,0.6); }
+.health-dot.yellow { background: var(--amber); box-shadow: 0 0 6px rgba(245,166,35,0.6); }
+.health-dot.red { background: var(--red); box-shadow: 0 0 6px rgba(240,87,122,0.6); }
+
+.view-toggle { display: flex; gap: 4px; background: var(--panel-raised); border-radius: 8px; padding: 3px; }
+.view-toggle button { background: none; border: none; color: var(--text-muted); padding: 6px 14px; border-radius: 6px; font-size: 0.82rem; cursor: pointer; font-family: 'Inter', sans-serif; }
+.view-toggle button.active { background: var(--panel); color: var(--text); }
+
+.noc-tree { display: flex; flex-direction: column; gap: 2px; }
+.noc-tree-node { border-radius: 8px; }
+.noc-tree-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
+  cursor: pointer; font-size: 0.85rem;
+}
+.noc-tree-row:hover { background: var(--panel-raised); }
+.noc-tree-row .caret { width: 14px; color: var(--text-muted); font-size: 0.7rem; transition: transform 0.15s; }
+.noc-tree-row .caret.open { transform: rotate(90deg); }
+.noc-tree-row .tree-label { flex: 1; font-weight: 500; }
+.noc-tree-row .tree-count { color: var(--text-muted); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
+.noc-tree-children { padding-left: 24px; display: flex; flex-direction: column; gap: 2px; }
+.noc-tree-account { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: 0.82rem; cursor: pointer; }
+.noc-tree-account:hover { background: var(--panel-raised); }
+.noc-tree-account .acc-meta { color: var(--text-muted); font-size: 0.72rem; margin-left: auto; font-family: 'JetBrains Mono', monospace; }
+
+.heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.heatmap-cell {
+  aspect-ratio: 1; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700;
+  color: rgba(6,10,20,0.75); transition: transform 0.1s;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.heatmap-cell:hover { transform: scale(1.08); }
+.heatmap-cell.green { background: var(--green); }
+.heatmap-cell.yellow { background: var(--amber); }
+.heatmap-cell.red { background: var(--red); color: #fff; }

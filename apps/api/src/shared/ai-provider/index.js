@@ -62,8 +62,22 @@ async function analyze({ schema, systemPrompt, context, provider, model, maxToke
 
   const userPrompt = JSON.stringify(context);
 
+  // Achado real (2026-08-11, seguindo o Roteiro de Teste — Camada A do
+  // Auditor de LP falhou com 7 campos obrigatórios ausentes na resposta):
+  // o schema JSON nunca era mandado pro modelo, só usado pra VALIDAR a
+  // resposta depois — a IA tinha que adivinhar o formato exato só pela
+  // prosa do systemPrompt, que pode ficar desatualizada em relação ao
+  // schema real (e ficou, nesse caso: 6 campos obrigatórios do schema nunca
+  // eram mencionados no prompt). Corrigido de forma sistêmica, não só pra
+  // esse prompt: o schema completo agora vai junto em TODA chamada, pra
+  // qualquer um dos 7 schemas do projeto, não só o que quebrou — elimina
+  // essa categoria de bug em vez de remendar 1 ocorrência.
+  const schemaInstruction = `\n\nFormato de resposta EXIGIDO (JSON Schema, siga exatamente — todo campo ` +
+    `listado em "required" é obrigatório, "additionalProperties: false" significa que nenhum campo ` +
+    `fora do schema pode aparecer):\n${JSON.stringify(schemaDef)}`;
+
   async function callAndValidate(extraInstruction) {
-    const finalSystemPrompt = extraInstruction ? `${systemPrompt}\n\n${extraInstruction}` : systemPrompt;
+    const finalSystemPrompt = `${systemPrompt}${schemaInstruction}${extraInstruction ? `\n\n${extraInstruction}` : ''}`;
     const { text, model: usedModel, provider: usedProvider } = await adapter.complete({
       systemPrompt: finalSystemPrompt,
       userPrompt,
@@ -92,9 +106,15 @@ async function analyze({ schema, systemPrompt, context, provider, model, maxToke
   } catch (firstErr) {
     log.warn('Primeira tentativa falhou, tentando 1 retry com correção', { error: firstErr.message });
     try {
+      // Achado real (2026-08-11): o retry mandava só "tente de novo", sem
+      // dizer QUAIS campos faltaram — a IA repetia o mesmo erro, porque não
+      // sabia o que tinha errado. Corrigido: o retry agora cita o erro real
+      // do AJV (`firstErr.message`, que já inclui os campos ausentes/extras
+      // específicos), não uma instrução genérica.
       return await callAndValidate(
-        'Sua resposta anterior não seguiu o formato JSON exigido. Responda novamente, ' +
-        'SOMENTE com o objeto JSON válido, sem nenhum texto fora dele.'
+        `Sua resposta anterior falhou nesta validação exata: "${firstErr.message}". ` +
+        `Corrija especificamente esses campos e responda de novo, SOMENTE com o objeto ` +
+        `JSON válido, sem nenhum texto fora dele.`
       );
     } catch (secondErr) {
       log.error('Retry também falhou', { error: secondErr.message });

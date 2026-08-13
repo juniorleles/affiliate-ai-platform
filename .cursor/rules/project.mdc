@@ -72,6 +72,11 @@ apareça pra alguma rede específica.
 
 ## O que evitar
 
+- Fase 7 Parte B (diagnóstico + rascunho de apelação de suspensão) foi **cortada
+  por decisão consciente** (2026-08-05), com base em pesquisa real de taxa de
+  sucesso de apelação — não é lacuna esquecida. Não implementar isso sem pedido
+  explícito do usuário.
+
 - **Fase 6 (rascunho de campanha) NUNCA escreve no Google Ads.** Decisão
   explícita de 2026-08-05: o sistema só prepara o rascunho (orçamento validado,
   keywords, copy da IA) — a criação da campanha é sempre manual, feita pelo

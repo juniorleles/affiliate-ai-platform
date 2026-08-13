@@ -11,13 +11,15 @@
 const pool = require('../../shared/db/pool');
 const discoveryRepo = require('../discovery/repository');
 const marketIntelRepo = require('../market-intel/repository');
+const decisionEngineRepo = require('../decision-engine/repository');
 const { fetchPageText } = require('../discovery/lpTextFetch');
 const aiAdvisor = require('../ai-advisor/service');
 const repo = require('./repository');
+const { selectDraftKeywords } = require('./keywordIntent');
 
 const MAX_DAILY_BUDGET = Number(process.env.MAX_DAILY_BUDGET_HARD_CAP || 100);
 
-async function createDraft({ productId, googleAdsAccountId, name, dailyBudget, excludeKeywordTerms }) {
+async function createDraft({ productId, googleAdsAccountId, name, dailyBudget, excludeKeywordTerms, overrideDecision }) {
   if (!productId || !name || dailyBudget == null) {
     throw Object.assign(new Error('productId, name e dailyBudget são obrigatórios.'), { status: 400 });
   }
@@ -30,6 +32,43 @@ async function createDraft({ productId, googleAdsAccountId, name, dailyBudget, e
 
   const product = await discoveryRepo.findProductById(productId);
   if (!product) throw Object.assign(new Error('Produto não encontrado.'), { status: 404 });
+
+  // Trava do Decision Engine (2026-08-06, pedido do usuário) — antes de hoje,
+  // dava pra gerar rascunho de qualquer produto, mesmo um que a Fase 12 já
+  // tinha classificado "descartar". `descartar` bloqueia por padrão (você
+  // pode passar `overrideDecision: true` se tiver um motivo real pra ir
+  // contra o sistema — não é trava dura tipo orçamento, é decisão reversível
+  // com esforço extra de propósito). `investigar` não bloqueia, só avisa —
+  // ficaria estranho impedir totalmente algo que o próprio sistema já
+  // classificou como "ainda não sei". Produto nunca avaliado (sem decisão
+  // salva) não bloqueia — falha aberto, não trava fluxo que nunca usou essa
+  // fase ainda.
+  const decision = await decisionEngineRepo.getLatestDecision(productId);
+  let decisionWarning = null;
+  if (decision) {
+    if (decision.decision_status === 'descartar' && !overrideDecision) {
+      throw Object.assign(
+        new Error(
+          `O Decision Engine classificou esse produto como "descartar" ` +
+          `(motivo: ${decision.stopped_reason}, opportunity=${decision.score}, ` +
+          `confidence=${decision.confidence_score}). Se você tem um motivo real pra seguir mesmo assim, ` +
+          `chame de novo com { overrideDecision: true }.`
+        ),
+        { status: 409 }
+      );
+    }
+    // Achado real (2026-08-06): quando overrideDecision ignora um "descartar",
+    // a resposta não deixava rastro nenhum disso — alguém revisando o
+    // rascunho depois não teria como saber que ele foi criado CONTRA um
+    // veredito explícito do sistema. Corrigido: o override some no
+    // silêncio, o AVISO não.
+    if (decision.decision_status === 'descartar' && overrideDecision) {
+      decisionWarning = `⚠️ Rascunho criado com overrideDecision=true, ignorando um veredito de "descartar" do Decision Engine (motivo: ${decision.stopped_reason}, opportunity=${decision.score}, confidence=${decision.confidence_score}). Revisão humana explícita foi usada pra seguir mesmo assim.`;
+    }
+    if (decision.decision_status === 'investigar') {
+      decisionWarning = `Atenção: o Decision Engine ainda está em "investigar" pra esse produto (motivo: ${decision.stopped_reason}) — a decisão de anunciar ainda não tem confiança suficiente. Rascunho gerado mesmo assim, revise com cuidado extra.`;
+    }
+  }
 
   const economics = await marketIntelRepo.getLatestEconomics(productId);
   const keywordMetrics = await repo.getLatestKeywordMetrics(productId);
@@ -46,18 +85,22 @@ async function createDraft({ productId, googleAdsAccountId, name, dailyBudget, e
   // Achado real (2026-08-05): a pesquisa de keyword (Fase 2b) traz "ideias
   // relacionadas" que incluem nomes de marca de CONCORRENTES (ex: "xtend bcaa",
   // "kion aminos" apareceram pra um produto de aminoácido) — o Google Keyword
-  // Planner faz isso de propósito (mostra o que gente busca "vs"), mas não
-  // deveria virar sugestão automática de compra sem aviso. Sem uma lista de
-  // marcas mantida, não dá pra detectar isso 100% sozinho — por isso aceita
-  // `excludeKeywordTerms` (você já sabe quais marcas evitar) e sempre avisa no
-  // texto de cópia pra revisar antes de usar (ver formatDraftForCopy).
-  const excludeSet = new Set((excludeKeywordTerms || []).map(t => t.toLowerCase().trim()).filter(Boolean));
-  const topKeywords = (keywordMetrics || [])
-    .filter(k => k.top_of_page_bid_low != null)
-    .filter(k => !excludeSet.has(k.keyword_text.toLowerCase().trim()))
-    .sort((a, b) => (Number(b.avg_monthly_searches) || 0) - (Number(a.avg_monthly_searches) || 0))
-    .slice(0, 10)
-    .map(k => ({ text: k.keyword_text, matchType: 'phrase' }));
+  // Planner faz isso de propósito, mas não deveria virar sugestão automática
+  // de compra sem aviso. `excludeKeywordTerms` deixa você filtrar as que já
+  // conhece; o texto de cópia sempre avisa pra revisar as demais.
+  //
+  // 2 bugs reais corrigidos em 2026-08-05 (achados testando com dado real):
+  // exclusão comparava a keyword INTEIRA em vez de substring (excluir "xtend"
+  // não pegava "xtend bcaa"), e keyword_metrics podia ter a mesma keyword_text
+  // duplicada de pesquisas com seeds diferentes que se sobrepõem — sem dedupe,
+  // ocupava 2 das 10 vagas por engano. Lógica de seleção extraída pra
+  // keywordIntent.js#selectDraftKeywords() — função pura, testável, ambos os
+  // bugs cobertos por teste unitário agora.
+  const topKeywords = selectDraftKeywords(keywordMetrics, { excludeTerms: excludeKeywordTerms, limit: 10 });
+
+  if (!topKeywords.some(k => k.funnelStage === 'bottom')) {
+    console.warn('[campaign-drafts] Nenhuma keyword com sinal de fundo de funil encontrada — rascunho usando só termos "unclear". Considere pesquisar keywords mais específicas (Fase 2b) ou revisar manualmente antes de aprovar.');
+  }
 
   const { result: copy } = await aiAdvisor.generateAdCopy({
     product, pageText, keywords: topKeywords.map(k => k.text), economics,
@@ -76,7 +119,7 @@ async function createDraft({ productId, googleAdsAccountId, name, dailyBudget, e
     ]
   );
 
-  return { draft: rows[0], correspondenceCheck: copy.correspondence_check };
+  return { draft: rows[0], correspondenceCheck: copy.correspondence_check, decisionWarning };
 }
 
 async function listDrafts() {
@@ -143,11 +186,18 @@ function formatDraftForCopy(draft) {
     `URL DE DESTINO: ${draft.final_url || '(preencher manualmente)'}`,
     '',
     `PALAVRAS-CHAVE (${keywords.length}):`,
-    ...keywords.map(k => `  ${(matchSymbol[k.matchType] || matchSymbol.phrase)(k.text)}`),
-    '  ⚠️  Revise antes de colar: keywords de pesquisa geral podem incluir nome de',
-    '      marca de CONCORRENTE (ex: apareceu "xtend"/"kion" numa pesquisa real de',
-    '      suplemento). O sistema não filtra marca automaticamente com confiança —',
-    '      use excludeKeywordTerms ao gerar o rascunho pra remover as que você já conhece.',
+    ...keywords.map(k => {
+      const flags = [];
+      if (k.funnelStage !== 'bottom') flags.push('sem sinal claro de fundo de funil');
+      if (k.hasBidData === false) flags.push('sem dado de leilão — defina lance manual');
+      const flagText = flags.length ? `  [revisar: ${flags.join('; ')}]` : '';
+      return `  ${(matchSymbol[k.matchType] || matchSymbol.phrase)(k.text)}${flagText}`;
+    }),
+    '  ⚠️  Revise antes de colar: (1) marca de CONCORRENTE pode aparecer numa pesquisa',
+    '      geral (ex: "xtend"/"kion" apareceram numa pesquisa real de suplemento) — use',
+    '      excludeKeywordTerms pra remover as que você já conhece; (2) termos marcados',
+    '      "sem sinal claro de fundo de funil" acima são o que sobrou pra completar 10 —',
+    '      confirme se ainda fazem sentido pra campanha de alta intenção de compra.',
     '',
     `HEADLINES (${headlines.length}):`,
     ...headlines.map((h, i) => `  ${i + 1}. ${h} (${h.length} caracteres)`),

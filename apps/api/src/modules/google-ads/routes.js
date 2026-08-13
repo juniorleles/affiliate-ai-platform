@@ -62,6 +62,19 @@ router.get('/keyword-research/:productId', requireAdmin, async (req, res) => {
   res.json({ metrics });
 });
 
+// Enriquece keyword_metrics com termo de fundo de funil (seeds de intenção
+// comercial: "buy X", "X price", "X discount", etc.) — não recalcula Economics,
+// só alimenta o pool que a Fase 6 usa pra montar rascunho de campanha.
+// Body: { baseSeed?, modifiers? } — sem baseSeed, usa o nome do produto;
+// sem modifiers, usa a lista padrão em inglês (buy/price/discount/coupon/where to buy).
+router.post('/keyword-research/:productId/commercial-intent', requireAdmin, async (req, res) => {
+  try {
+    const { baseSeed, modifiers } = req.body || {};
+    const result = await service.researchCommercialIntentKeywords(req.params.productId, { baseSeed, modifiers });
+    res.json(result);
+  } catch (err) { handleServiceError(res, err); }
+});
+
 // Utilitário: qual moeda a conta do Google Ads usa de verdade (não assumir).
 router.get('/account-currency', requireAdmin, async (req, res) => {
   try {
@@ -83,9 +96,53 @@ router.post('/accounts', requireAdmin, async (req, res) => {
   } catch (err) { handleServiceError(res, err); }
 });
 
+router.delete('/accounts/:id', requireAdmin, async (req, res) => {
+  try {
+    const account = await service.removeAccount(req.params.id);
+    res.json({ account });
+  } catch (err) { handleServiceError(res, err); }
+});
+
 router.post('/accounts/refresh-status', requireAdmin, async (req, res) => {
   const results = await service.refreshAllAccountStatuses();
   res.json({ results });
+});
+
+// --- Governança "guarda-chuva" (2026-08-05) ---
+
+router.get('/mccs', requireAdmin, async (req, res) => {
+  const mccs = await service.listMccs();
+  res.json({ mccs });
+});
+
+router.post('/mccs', requireAdmin, async (req, res) => {
+  try {
+    const mcc = await service.addMcc(req.body);
+    res.status(201).json({ mcc });
+  } catch (err) { handleServiceError(res, err); }
+});
+
+router.delete('/mccs/:id', requireAdmin, async (req, res) => {
+  try {
+    const mcc = await service.removeMcc(req.params.id);
+    res.json({ mcc });
+  } catch (err) { handleServiceError(res, err); }
+});
+
+// Descobre as contas reais sob a MCC via API do Google — responde a
+// "como o sistema sabe quais contas existem?" (2026-08-06).
+router.post('/mccs/:id/sync-accounts', requireAdmin, async (req, res) => {
+  try {
+    const result = await service.syncAccountsFromMcc(req.params.id);
+    res.json(result);
+  } catch (err) { handleServiceError(res, err); }
+});
+
+// Visão consolidada: contas agrupadas por MCC/operação/método de pagamento —
+// pra enxergar "quantas contas dependem do mesmo cartão" sem contar na mão.
+router.get('/governance/rollup', requireAdmin, async (req, res) => {
+  const rollup = await service.getGovernanceRollup();
+  res.json(rollup);
 });
 
 // --- Fase 6: rascunhos de campanha ---

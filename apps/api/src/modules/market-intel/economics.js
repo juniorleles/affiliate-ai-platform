@@ -4,18 +4,25 @@
  * 100% testável isoladamente (ver tests/unit/economics.test.js).
  */
 
-const DEFAULT_MIN_COMMISSION = 20; // R$ — trava de segurança padrão, sobrescrevível por parâmetro
+const DEFAULT_MIN_COMMISSION = 20; // trava de segurança padrão — 20 unidades da MOEDA DO PRÓPRIO
+                                    // PRODUTO (USD ou EUR, os únicos usados até hoje), não R$/BRL.
+                                    // Corrigido em 2026-08-06: o comentário antigo dizia "R$" por engano
+                                    // (herdado do MVP original) — os produtos reais cadastrados sempre
+                                    // foram em EUR/USD, nunca em BRL. Sobrescrevível por parâmetro.
 const DEFAULT_MARGIN_PCT = 30;     // margem desejada padrão sobre o CPC de equilíbrio
 
 /**
  * Avalia a viabilidade financeira de um produto.
  *
  * @param {object} params
- * @param {number} params.comissaoEsperada - valor da comissão por venda (R$)
+ * @param {number} params.comissaoEsperada - valor da comissão por venda, na moeda do produto
  * @param {number} params.taxaConversaoEsperada - taxa de conversão esperada (ex: 0.02 = 2%)
  * @param {number} [params.margemDesejadaPct=30] - margem de segurança sobre o CPC de equilíbrio
  * @param {number} [params.comissaoMinima=20] - trava de segurança: abaixo disso, rejeita direto
+ *   (20 unidades da moeda do produto — USD ou EUR; ver DEFAULT_MIN_COMMISSION)
  * @param {number|null} [params.cpcLeilao=null] - CPC médio do leilão (vem da Fase 2b, opcional)
+ * @param {string} [params.moeda='USD/EUR'] - só usada nas mensagens de motivo, pra não dizer "R$"
+ *   quando o produto na verdade é EUR/USD — não faz conversão nenhuma, é rótulo apenas.
  * @returns {{status: string, comissaoMinimaOk: boolean, cpcEquilibrio: number|null,
  *            cpcMaximoCalculado: number|null, roiEstimadoPct: number|null, motivo: string|null}}
  */
@@ -25,6 +32,7 @@ function evaluateEconomics({
   margemDesejadaPct = DEFAULT_MARGIN_PCT,
   comissaoMinima = DEFAULT_MIN_COMMISSION,
   cpcLeilao = null,
+  moeda = '',
 }) {
   if (comissaoEsperada == null || isNaN(comissaoEsperada)) {
     throw new Error('comissaoEsperada é obrigatório e deve ser numérico.');
@@ -42,7 +50,7 @@ function evaluateEconomics({
       cpcEquilibrio: null,
       cpcMaximoCalculado: null,
       roiEstimadoPct: null,
-      motivo: `Comissão de R$ ${comissaoEsperada.toFixed(2)} está abaixo do mínimo configurado de R$ ${comissaoMinima.toFixed(2)}.`,
+      motivo: `Comissão de ${moeda} ${comissaoEsperada.toFixed(2)} está abaixo do mínimo configurado de ${moeda} ${comissaoMinima.toFixed(2)}.`,
     };
   }
 
@@ -69,8 +77,8 @@ function evaluateEconomics({
 
   if (cpcLeilao != null && !isNaN(cpcLeilao) && cpcLeilao > cpcMaximoCalculado) {
     status = 'rejeitado_por_economics';
-    motivo = `CPC médio do leilão (R$ ${cpcLeilao.toFixed(2)}) é maior que o CPC máximo ` +
-      `aceitável (R$ ${cpcMaximoCalculado.toFixed(2)}).`;
+    motivo = `CPC médio do leilão (${moeda} ${cpcLeilao.toFixed(2)}) é maior que o CPC máximo ` +
+      `aceitável (${moeda} ${cpcMaximoCalculado.toFixed(2)}).`;
   }
 
   return {

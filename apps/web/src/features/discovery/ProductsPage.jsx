@@ -14,6 +14,11 @@ const ECONOMICS_LABELS = {
 
 const NICHE_LABELS = { normal: 'Nicho normal', sensitive: 'Nicho sensível', black: 'Nicho black' };
 
+// Reaproveita classes de cor que já existem (verdict.worth-yes/medium/worth-no)
+// em vez de criar CSS novo — mesmo princípio de reaproveitamento do dia inteiro.
+const DECISION_LABELS = { testar: '🟢 Testar', investigar: '🟡 Investigar', descartar: '🔴 Descartar' };
+const DECISION_CLASSES = { testar: 'worth-yes', investigar: 'medium', descartar: 'worth-no' };
+
 function fmtMoney(v, currency) {
   if (v == null) return '—';
   return `${currency || ''} ${Number(v).toFixed(2)}`.trim();
@@ -25,6 +30,7 @@ export default function ProductsPage() {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [lpAuditProduct, setLpAuditProduct] = useState(null);
+  const [evaluatingId, setEvaluatingId] = useState(null);
 
   async function loadProducts() {
     setLoading(true);
@@ -43,6 +49,18 @@ export default function ProductsPage() {
   function handleSaved(closeFn) {
     closeFn(null);
     loadProducts();
+  }
+
+  async function handleEvaluate(productId) {
+    setEvaluatingId(productId);
+    try {
+      await api.post(`/decision-engine/${productId}/evaluate`, {});
+      await loadProducts();
+    } catch (err) {
+      alert(`Erro ao avaliar: ${err.message}`);
+    } finally {
+      setEvaluatingId(null);
+    }
   }
 
   return (
@@ -89,6 +107,15 @@ export default function ProductsPage() {
                 </div>
 
                 <div className="product-card-badges">
+                  {p.decision_status && (
+                    <span
+                      className={`verdict ${DECISION_CLASSES[p.decision_status] || ''}`}
+                      title={p.decision_stopped_reason ? `Motivo: ${p.decision_stopped_reason} (etapa: ${p.decision_evidence_stage})` : ''}
+                    >
+                      {DECISION_LABELS[p.decision_status] || p.decision_status}
+                      {p.decision_opportunity_score != null && ` · ${p.decision_opportunity_score}/${p.decision_confidence_score}`}
+                    </span>
+                  )}
                   {p.economics_status && (
                     <span className={`verdict ${p.economics_status}`}>
                       {ECONOMICS_LABELS[p.economics_status] || p.economics_status}
@@ -105,6 +132,9 @@ export default function ProductsPage() {
                 <div className="product-card-actions">
                   <button className="btn" onClick={() => setLpAuditProduct(p)}>
                     {lpPending ? 'Auditar página' : 'Editar auditoria'}
+                  </button>
+                  <button className="btn" onClick={() => handleEvaluate(p.id)} disabled={evaluatingId === p.id}>
+                    {evaluatingId === p.id ? 'Avaliando...' : p.decision_status ? 'Reavaliar' : 'Avaliar oportunidade'}
                   </button>
                 </div>
               </div>

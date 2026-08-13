@@ -2,6 +2,21 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluateEconomics, estimateRoi } = require('../../src/modules/market-intel/economics');
 
+test('mensagem de motivo usa a moeda real do produto, nunca "R$" fixo (achado real, 2026-08-06)', () => {
+  const resultEur = evaluateEconomics({ comissaoEsperada: 15, taxaConversaoEsperada: 0.05, moeda: 'EUR' });
+  assert.match(resultEur.motivo, /EUR 15\.00.*EUR 20\.00/);
+  assert.doesNotMatch(resultEur.motivo, /R\$/);
+
+  const resultUsd = evaluateEconomics({ comissaoEsperada: 10, taxaConversaoEsperada: 0.05, moeda: 'USD' });
+  assert.match(resultUsd.motivo, /USD 10\.00.*USD 20\.00/);
+  assert.doesNotMatch(resultUsd.motivo, /R\$/);
+});
+
+test('trava de comissão mínima continua em 20 (dólar ou euro, conforme pedido do usuário)', () => {
+  const { DEFAULT_MIN_COMMISSION } = require('../../src/modules/market-intel/economics');
+  assert.equal(DEFAULT_MIN_COMMISSION, 20);
+});
+
 test('calcula CPC de equilíbrio e CPC máximo corretamente, aplicando a margem', () => {
   const result = evaluateEconomics({
     comissaoEsperada: 100,

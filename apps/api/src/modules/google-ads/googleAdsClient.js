@@ -1,5 +1,21 @@
 const { GoogleAdsApi } = require('google-ads-api');
 
+// Achado real (2026-08-06): o recurso `customer_client` devolve `status` como
+// código NUMÉRICO bruto (ex: 2), diferente de `customer.status` (usado em
+// fetchAccountStatus abaixo), que já vem como string ('ENABLED', 'SUSPENDED'
+// etc.) — mesma lib, resource diferente, serialização diferente. Sem tradução,
+// isso quebrava silenciosamente a detecção de conta crítica em outros lugares
+// do código (que comparam string, ex: `['SUSPENDED', ...].includes(status)`).
+// Valores conferem com o enum oficial CustomerStatus da API do Google Ads.
+const CUSTOMER_STATUS_ENUM = {
+  0: 'UNSPECIFIED', 1: 'UNKNOWN', 2: 'ENABLED', 3: 'CANCELED', 4: 'SUSPENDED', 5: 'CLOSED',
+};
+function normalizeCustomerStatus(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'string' && isNaN(Number(raw))) return raw; // já veio como string (ex: customer.status)
+  return CUSTOMER_STATUS_ENUM[Number(raw)] ?? String(raw);
+}
+
 // Cliente reaproveitado entre chamadas — a credencial de app (client_id/secret/
 // developer_token) é sempre a mesma, só customer_id/refresh_token/login_customer_id
 // mudam por conta (Fase 7, suporte multi-conta, 2026-08-05).
@@ -124,4 +140,62 @@ async function fetchAdApprovalStatuses(account) {
   })).filter(a => a.adId);
 }
 
-module.exports = { getClient, getCustomer, fetchCampaignMetrics, fetchAccountCurrency, fetchAccountStatus, fetchAdApprovalStatuses };
+/**
+ * Descobre a hierarquia real de contas sob uma MCC (2026-08-06, respondendo
+ * a pergunta direta do usuário: "como o sistema sabe quais contas existem?").
+ * API oficial: recurso `customer_client`, consultado a partir da própria MCC
+ * (login_customer_id = customer_id da MCC). Confirmado via pesquisa antes de
+ * implementar (mesma disciplina de sempre) — é o jeito documentado pelo
+ * Google de listar hierarquia, diferente de `ListAccessibleCustomers` (que
+ * só lista o que o usuário tem acesso direto, não a árvore da MCC).
+ *
+ * Mesma ressalva de sempre: nomes de campo não confirmados contra conta real
+ * a partir deste ambiente — parsing defensivo, avisa se vier vazio.
+ */
+async function fetchAccountHierarchy(mccAccount) {
+  // Consulta a própria MCC: customer_id E login_customer_id apontam pra ela,
+  // pra ver a árvore inteira que ela gerencia.
+  const asMcc = { customer_id: mccAccount.mcc_customer_id, login_customer_id: mccAccount.mcc_customer_id };
+  const customer = getCustomer(asMcc);
+
+  const rows = await customer.query(`
+    SELECT
+      customer_client.id, customer_client.descriptive_name, customer_client.level,
+      customer_client.manager, customer_client.status, customer_client.hidden
+    FROM customer_client
+    WHERE customer_client.level <= 2
+  `);
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    console.warn('[google-ads] fetchAccountHierarchy não retornou nada pra MCC', mccAccount.mcc_customer_id, '— confira se o customer_id está certo e se é mesmo uma MCC.');
+    return [];
+  }
+
+  const parsed = rows.map(r => ({
+    customerId: String(r.customer_client?.id ?? ''),
+    name: r.customer_client?.descriptive_name ?? null,
+    level: r.customer_client?.level ?? null,
+    isManager: !!r.customer_client?.manager,
+    status: normalizeCustomerStatus(r.customer_client?.status),
+    hidden: !!r.customer_client?.hidden,
+  }));
+
+  // Achado real (2026-08-06): quando a linha de nível 0 (a própria conta
+  // consultada) não é `manager: true`, ela simplesmente não tem filhas —
+  // isso é uma conta comum, não uma MCC de verdade. Sem essa checagem
+  // explícita, o resultado virava "0 contas encontradas" sem explicação,
+  // indistinguível de uma falha real. Erro claro é melhor que "0" silencioso.
+  const selfRow = parsed.find(c => c.level === 0);
+  if (selfRow && !selfRow.isManager) {
+    throw new Error(
+      `A conta ${mccAccount.mcc_customer_id} (${selfRow.name || 'sem nome'}) não é uma conta ` +
+      `gerenciadora (MCC) segundo a própria API do Google — é uma conta comum, não tem sub-contas. ` +
+      `Confirme se esse é realmente o customer_id da sua MCC (na UI do Google Ads, contas MCC têm um ` +
+      `seletor de contas no canto superior; contas comuns não têm).`
+    );
+  }
+
+  return parsed.filter(c => c.customerId && c.level !== 0); // level 0 = a própria MCC, não uma conta filha
+}
+
+module.exports = { getClient, getCustomer, fetchCampaignMetrics, fetchAccountCurrency, fetchAccountStatus, fetchAdApprovalStatuses, fetchAccountHierarchy };

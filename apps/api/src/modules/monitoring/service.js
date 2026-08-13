@@ -1,6 +1,6 @@
 const repo = require('./repository');
 const googleAdsRepo = require('../google-ads/repository');
-const { fetchAdApprovalStatuses } = require('../google-ads/googleAdsClient');
+const { fetchAdApprovalStatuses, fetchAccountStatus } = require('../google-ads/googleAdsClient');
 const { withContext } = require('../../shared/logger');
 
 const log = withContext('monitoring');
@@ -105,6 +105,50 @@ async function checkAdDisapprovals() {
 }
 
 /**
+ * Detecção de mudança de status de CONTA (não campanha) — base do módulo de
+ * contingência guarda-chuva (2026-08-05). Só alerta quando o status muda de
+ * verdade (compara com previous_status gravado na última checagem) — sem
+ * isso, geraria alerta repetido a cada 15min enquanto o status continuasse
+ * igual, mesmo sem nada de novo ter acontecido.
+ */
+async function checkAccountStatusChanges() {
+  // Custo de cota, calculado (não assumido): com "dezenas" de contas (público-alvo
+  // real desse módulo, não centenas), 30 contas × 4 checagens/hora × 24h = 2.880
+  // chamadas/dia — bem dentro do limite de 15 mil operações/dia do Acesso Básico
+  // (já confirmado suficiente na Fase 2b). Se a escala crescer bem além de
+  // dezenas, revisitar a frequência (ex: checar status só 1x/hora, não a cada 15min).
+  const accounts = await googleAdsRepo.listAccounts();
+  let alertsCreated = 0;
+
+  for (const account of accounts) {
+    let currentStatus;
+    try {
+      currentStatus = await fetchAccountStatus(account);
+    } catch (err) {
+      log.warn(`Falha ao checar status da conta ${account.name || account.customer_id}, pulando:`, { error: err.message });
+      continue;
+    }
+
+    const changed = currentStatus && account.status && currentStatus !== account.status;
+    await googleAdsRepo.updateAccountStatus(account.id, currentStatus || 'unknown');
+
+    if (changed) {
+      const concerning = ['SUSPENDED', 'CANCELED', 'CLOSED'].includes(currentStatus);
+      await repo.createAlert({
+        type: 'account_status_change',
+        severity: concerning ? 'high' : 'medium',
+        subjectType: 'account',
+        subjectId: account.id,
+        message: `Conta "${account.name || account.customer_id}" (${account.operacao || 'sem operação marcada'}) mudou de status: ${account.status} → ${currentStatus}.`,
+      });
+      alertsCreated++;
+    }
+  }
+
+  return alertsCreated;
+}
+
+/**
  * Roda todas as verificações de monitoramento. Chamado pelo n8n (via rota interna)
  * ou pelo worker de fila (ver src/jobs/monitoring.worker.js).
  */
@@ -112,9 +156,10 @@ async function runAllChecks() {
   const statusAlerts = await checkCampaignStatusChanges();
   const impressionAlerts = await checkImpressionDrops();
   const adDisapprovalAlerts = await checkAdDisapprovals();
-  const total = statusAlerts + impressionAlerts + adDisapprovalAlerts;
+  const accountStatusAlerts = await checkAccountStatusChanges();
+  const total = statusAlerts + impressionAlerts + adDisapprovalAlerts + accountStatusAlerts;
   log.info(`Checagem concluída: ${total} alerta(s) novo(s).`);
-  return { total, statusAlerts, impressionAlerts, adDisapprovalAlerts };
+  return { total, statusAlerts, impressionAlerts, adDisapprovalAlerts, accountStatusAlerts };
 }
 
 module.exports = {
